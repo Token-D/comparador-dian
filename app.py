@@ -44,9 +44,25 @@ def procesar_token_dian(df):
 
 def procesar_libro_auxiliar(df):
     try:
-        # Saltar las primeras 4 filas y usar la fila 4 como encabezados
-        df.columns = df.iloc[3]
+        # Primero, mostrar información de diagnóstico
+        st.write("Columnas disponibles en el Libro Auxiliar:")
+        st.write(df.columns.tolist())
+        
+        # Mostrar las primeras filas para diagnóstico
+        st.write("Primeras 5 filas del archivo:")
+        st.write(df.head())
+        
+        # Saltar las primeras 4 filas y resetear el índice
         df = df.iloc[4:].reset_index(drop=True)
+        
+        # Asignar nombres de columnas desde la fila 4 (que ahora es la primera)
+        nombres_columnas = df.iloc[0]
+        df = df.iloc[1:].reset_index(drop=True)
+        df.columns = nombres_columnas
+        
+        # Mostrar columnas después del procesamiento
+        st.write("Columnas después del procesamiento:")
+        st.write(df.columns.tolist())
         
         # Extraer NIT de la columna Tercero
         df['Nit'] = df['Tercero'].str.extract(r'Nit:\s*(\d+)')
@@ -64,13 +80,12 @@ def procesar_libro_auxiliar(df):
             'Nit': 'first'
         }).reset_index()
         
-        st.write("Resumen del procesamiento Libro Auxiliar:")
-        st.write(f"- Registros procesados: {len(df_agrupado)}")
-        
         return df_agrupado
         
     except Exception as e:
         st.error(f"Error en procesamiento del Libro Auxiliar: {str(e)}")
+        st.write("Estructura del archivo:")
+        st.write(df.head())
         return None
 
 def buscar_coincidencias(df_token, df_libro):
