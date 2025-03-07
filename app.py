@@ -44,48 +44,68 @@ def procesar_token_dian(df):
 
 def procesar_libro_auxiliar(df):
     try:
-        # Primero, mostrar información de diagnóstico
-        st.write("Columnas disponibles en el Libro Auxiliar:")
-        st.write(df.columns.tolist())
+        # Mostrar información inicial para diagnóstico
+        st.write("Tamaño original del archivo:", df.shape)
         
-        # Mostrar las primeras filas para diagnóstico
-        st.write("Primeras 5 filas del archivo:")
-        st.write(df.head())
+        # Obtener los nombres de las columnas de la fila 4 (índice 3)
+        nombres_columnas = df.iloc[3]
         
-        # Saltar las primeras 4 filas y resetear el índice
-        df = df.iloc[4:].reset_index(drop=True)
+        # Crear nuevo DataFrame desde la fila 5 en adelante (índice 4)
+        df_procesado = df.iloc[4:].copy()
         
-        # Asignar nombres de columnas desde la fila 4 (que ahora es la primera)
-        nombres_columnas = df.iloc[0]
-        df = df.iloc[1:].reset_index(drop=True)
-        df.columns = nombres_columnas
+        # Asignar los nombres de las columnas
+        df_procesado.columns = nombres_columnas
         
-        # Mostrar columnas después del procesamiento
-        st.write("Columnas después del procesamiento:")
-        st.write(df.columns.tolist())
+        # Resetear el índice
+        df_procesado = df_procesado.reset_index(drop=True)
         
-        # Extraer NIT de la columna Tercero
-        df['Nit'] = df['Tercero'].str.extract(r'Nit:\s*(\d+)')
+        # Mostrar información de las columnas para diagnóstico
+        st.write("Nombres de columnas encontrados:")
+        st.write(list(df_procesado.columns))
         
-        # Filtrar registros que empiezan con FC, NC o contienen PILA
-        mascara = (df['Nota'].str.startswith('FC') | 
-                  df['Nota'].str.startswith('NC') | 
-                  df['Nota'].str.contains('PILA', na=False))
-        df = df[mascara]
+        # Mostrar las primeras filas para verificar
+        st.write("Primeras filas después del procesamiento:")
+        st.write(df_procesado.head())
         
-        # Agrupar por fecha, nota, doc_num y tercero
-        df_agrupado = df.groupby(['Fecha', 'Nota', 'Doc Num', 'Tercero']).agg({
-            'Debito': 'sum',
-            'Credito': 'sum',
-            'Nit': 'first'
-        }).reset_index()
-        
-        return df_agrupado
-        
+        # Extraer NIT de la columna que contiene la información del tercero
+        # Primero, identificar la columna correcta
+        columna_tercero = [col for col in df_procesado.columns if 'Tercero' in str(col) or 'NIT' in str(col)]
+        if columna_tercero:
+            columna_tercero = columna_tercero[0]
+            st.write(f"Columna de tercero encontrada: {columna_tercero}")
+            
+            # Extraer NIT usando regex
+            df_procesado['Nit'] = df_procesado[columna_tercero].str.extract(r'Nit:\s*(\d+)')
+            
+            # Filtrar registros que empiezan con FC, NC o contienen PILA
+            columna_nota = [col for col in df_procesado.columns if 'Nota' in str(col)][0]
+            mascara = (df_procesado[columna_nota].str.startswith('FC') | 
+                      df_procesado[columna_nota].str.startswith('NC') | 
+                      df_procesado[columna_nota].str.contains('PILA', na=False))
+            df_procesado = df_procesado[mascara]
+            
+            # Identificar columnas para agrupación
+            columna_fecha = [col for col in df_procesado.columns if 'Fecha' in str(col)][0]
+            columna_doc_num = [col for col in df_procesado.columns if 'Doc' in str(col)][0]
+            columna_debito = [col for col in df_procesado.columns if 'Debito' in str(col) or 'Débito' in str(col)][0]
+            columna_credito = [col for col in df_procesado.columns if 'Credito' in str(col) or 'Crédito' in str(col)][0]
+            
+            # Agrupar por fecha, nota, doc_num y tercero
+            df_agrupado = df_procesado.groupby([columna_fecha, columna_nota, columna_doc_num, columna_tercero]).agg({
+                columna_debito: 'sum',
+                columna_credito: 'sum',
+                'Nit': 'first'
+            }).reset_index()
+            
+            return df_agrupado
+        else:
+            st.error("No se encontró la columna de Tercero")
+            return None
+            
     except Exception as e:
         st.error(f"Error en procesamiento del Libro Auxiliar: {str(e)}")
         st.write("Estructura del archivo:")
-        st.write(df.head())
+        st.write(df.head(10))  # Mostrar más filas para diagnóstico
         return None
 
 def buscar_coincidencias(df_token, df_libro):
