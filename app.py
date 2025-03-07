@@ -55,39 +55,38 @@ def procesar_libro_auxiliar(df):
         df_procesado = df.iloc[3:].copy()
         
         # Asignar los nombres de las columnas
-        df_procesado.columns = ['Cuenta', 'Tercero', 'Fecha', 'Nota', 'Doc Num', 'Descripcion', 'Debito', 'Credito', 'Saldo']
+        df_procesado.columns = nombres_columnas
         
         # Resetear el índice
         df_procesado = df_procesado.reset_index(drop=True)
         
-        # Mostrar información de diagnóstico
-        st.write("Primeras filas después del procesamiento:")
-        st.write(df_procesado.head())
+        # Convertir columnas numéricas
+        df_procesado['Debitos'] = pd.to_numeric(df_procesado['Debitos'], errors='coerce')
+        df_procesado['Creditos'] = pd.to_numeric(df_procesado['Creditos'], errors='coerce')
         
         # Extraer NIT de la columna Tercero
         df_procesado['Nit'] = df_procesado['Tercero'].str.extract(r'Nit:\s*(\d+)')
         
-        # Filtrar registros que empiezan con FC, NC o contienen PILA
-        mascara = (df_procesado['Nota'].str.startswith('FC', na=False) | 
-                  df_procesado['Nota'].str.startswith('NC', na=False) | 
-                  df_procesado['Nota'].str.contains('PILA', na=False))
-        df_procesado = df_procesado[mascara]
-        
-        # Convertir columnas numéricas
-        df_procesado['Debito'] = pd.to_numeric(df_procesado['Debito'], errors='coerce')
-        df_procesado['Credito'] = pd.to_numeric(df_procesado['Credito'], errors='coerce')
-        
-        # Agrupar por fecha, nota, doc_num y tercero
-        df_agrupado = df_procesado.groupby(['Fecha', 'Nota', 'Doc Num', 'Tercero']).agg({
-            'Debito': 'sum',
-            'Credito': 'sum',
-            'Nit': 'first'
+        # Agrupar solo por Doc Num
+        df_agrupado = df_procesado.groupby('Doc Num', dropna=False).agg({
+            'Debitos': 'sum',
+            'Creditos': 'sum',
+            'Tercero': 'first',  # Mantener el primer tercero
+            'Nit': 'first',      # Mantener el primer NIT
+            'Nota': 'first'      # Mantener la primera nota
         }).reset_index()
         
+        # Eliminar filas donde Doc Num es NaN o vacío
+        df_agrupado = df_agrupado[df_agrupado['Doc Num'].notna() & (df_agrupado['Doc Num'] != '')]
+        
         # Mostrar resumen del procesamiento
-        st.write("Resumen del procesamiento:")
+        st.write("\nResumen del procesamiento:")
         st.write(f"- Registros originales: {len(df_procesado)}")
         st.write(f"- Registros después de agrupar: {len(df_agrupado)}")
+        
+        # Mostrar muestra de los resultados
+        st.write("\nMuestra de los resultados agrupados:")
+        st.write(df_agrupado.head())
         
         return df_agrupado
         
@@ -95,7 +94,7 @@ def procesar_libro_auxiliar(df):
         st.error(f"Error en procesamiento del Libro Auxiliar: {str(e)}")
         st.write("Estructura del archivo original:")
         st.write(df.head(10))
-        st.write("Columnas disponibles:", list(df.columns))
+        st.write("Total de filas en el archivo:", len(df))
         return None
 
 def buscar_coincidencias(df_token, df_libro):
@@ -130,8 +129,16 @@ def buscar_coincidencias(df_token, df_libro):
         st.error(f"Error en búsqueda de coincidencias: {str(e)}")
         return None
 
-def crear_google_sheet(df_resultados, nombre_empresa):
+def crear_google_sheet(df, nombre_empresa):
     try:
+        # Convertir todas las columnas a string para evitar problemas de formato
+        df = df.astype(str)
+        
+        # Crear nombre del archivo
+        fecha_actual = datetime.now().strftime('%Y%m%d')
+        numero_aleatorio = random.randint(1000, 9999)
+        nombre_archivo = f"{nombre_empresa}_{fecha_actual}_{numero_aleatorio}"
+
         # Configurar credenciales
         credentials = service_account.Credentials.from_service_account_info(
             st.secrets["gcp_service_account"],
