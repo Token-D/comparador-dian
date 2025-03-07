@@ -149,16 +149,16 @@ def buscar_coincidencias(df_token, df_libro):
         st.write("Libro Auxiliar:", df_libro.columns.tolist())
         return None
 
-def crear_google_sheet(df, nombre_empresa):
+def crear_google_sheet(resultados, nombre_empresa):
     try:
-        # Convertir todas las columnas a string para evitar problemas de formato
-        df = df.astype(str)
+        # Convertir DataFrame a string para evitar problemas de formato
+        df_para_sheet = resultados.astype(str)
         
         # Crear nombre del archivo
         fecha_actual = datetime.now().strftime('%Y%m%d')
         numero_aleatorio = random.randint(1000, 9999)
         nombre_archivo = f"{nombre_empresa}_{fecha_actual}_{numero_aleatorio}"
-
+        
         # Configurar credenciales
         credentials = service_account.Credentials.from_service_account_info(
             st.secrets["gcp_service_account"],
@@ -166,14 +166,8 @@ def crear_google_sheet(df, nombre_empresa):
                    'https://www.googleapis.com/auth/drive']
         )
         
-        # Crear servicio de Sheets y Drive
-        sheets_service = build('sheets', 'v4', credentials=credentials)
-        drive_service = build('drive', 'v3', credentials=credentials)
-        
-        # Generar nombre del archivo
-        fecha_actual = datetime.now().strftime("%Y%m%d")
-        numero_aleatorio = random.randint(1000, 9999)
-        nombre_archivo = f"{nombre_empresa}_{fecha_actual}_{numero_aleatorio}"
+        # Crear servicio de Google Sheets
+        service = build('sheets', 'v4', credentials=credentials)
         
         # Crear nuevo spreadsheet
         spreadsheet = {
@@ -181,33 +175,41 @@ def crear_google_sheet(df, nombre_empresa):
                 'title': nombre_archivo
             }
         }
+        spreadsheet = service.spreadsheets().create(body=spreadsheet).execute()
+        spreadsheet_id = spreadsheet.get('spreadsheetId')
         
-        spreadsheet = sheets_service.spreadsheets().create(
-            body=spreadsheet,
-            fields='spreadsheetId'
-        ).execute()
+        # Preparar datos para escribir
+        valores = [df_para_sheet.columns.tolist()] + df_para_sheet.values.tolist()
         
-        # Mover archivo a la carpeta específica
-        file = drive_service.files().update(
-            fileId=spreadsheet.get('spreadsheetId'),
-            addParents='1Kup1_bWb2OTiuitmNE_zNurvplaLmerE',
-            fields='id, webViewLink'
-        ).execute()
-        
-        # Actualizar datos en el spreadsheet
-        rango = 'Sheet1!A1'
+        # Escribir datos
         body = {
-            'values': [df_resultados.columns.values.tolist()] + df_resultados.values.tolist()
+            'values': valores
         }
-        
-        sheets_service.spreadsheets().values().update(
-            spreadsheetId=spreadsheet.get('spreadsheetId'),
-            range=rango,
+        service.spreadsheets().values().update(
+            spreadsheetId=spreadsheet_id,
+            range='Sheet1!A1',
             valueInputOption='RAW',
             body=body
         ).execute()
         
-        return file.get('webViewLink')
+        # Mover archivo a la carpeta específica
+        drive_service = build('drive', 'v3', credentials=credentials)
+        
+        # ID de la carpeta de destino (de la URL que proporcionaste)
+        folder_id = '1Kup1_bWb2OTiuitmNE_zNurvplaLmerE'
+        
+        # Actualizar la carpeta del archivo
+        file = drive_service.files().update(
+            fileId=spreadsheet_id,
+            addParents=folder_id,
+            removeParents='root',
+            fields='id, parents'
+        ).execute()
+        
+        # Generar URL del archivo
+        sheet_url = f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}"
+        
+        return sheet_url
         
     except Exception as e:
         st.error(f"Error al crear Google Sheet: {str(e)}")
