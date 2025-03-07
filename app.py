@@ -44,29 +44,24 @@ def procesar_token_dian(df):
 
 def procesar_libro_auxiliar(df):
     try:
-        # Mostrar información inicial
         st.write("Procesando Libro Auxiliar...")
         
-        # Obtener los nombres de las columnas de la fila 4 (índice 3)
-        nombres_columnas = df.iloc[3]
-        st.write("Nombres de columnas encontrados en fila 4:")
+        # Obtener los nombres de las columnas de la fila 2 (índice 2)
+        nombres_columnas = df.iloc[2]
+        st.write("Nombres de columnas encontrados en fila 2:")
         st.write(list(nombres_columnas))
         
-        # Crear nuevo DataFrame desde la fila 5 en adelante (índice 4)
-        df_procesado = df.iloc[4:].copy()
+        # Crear nuevo DataFrame desde la fila 3 en adelante (índice 3)
+        df_procesado = df.iloc[3:].copy()
         
         # Asignar los nombres de las columnas
-        df_procesado.columns = nombres_columnas
+        df_procesado.columns = ['Cuenta', 'Tercero', 'Fecha', 'Nota', 'Doc Num', 'Descripcion', 'Debito', 'Credito', 'Saldo']
         
         # Resetear el índice
         df_procesado = df_procesado.reset_index(drop=True)
         
-        # Verificar las columnas disponibles
-        st.write("Columnas después del procesamiento:")
-        st.write(list(df_procesado.columns))
-        
-        # Mostrar las primeras filas para verificar
-        st.write("Primeras filas de datos (desde fila 5 del original):")
+        # Mostrar información de diagnóstico
+        st.write("Primeras filas después del procesamiento:")
         st.write(df_procesado.head())
         
         # Extraer NIT de la columna Tercero
@@ -78,29 +73,18 @@ def procesar_libro_auxiliar(df):
                   df_procesado['Nota'].str.contains('PILA', na=False))
         df_procesado = df_procesado[mascara]
         
-        # Asegurarse de que las columnas numéricas sean del tipo correcto
-        for col in ['Debito', 'Credito']:
-            if col in df_procesado.columns:
-                df_procesado[col] = pd.to_numeric(df_procesado[col], errors='coerce')
+        # Convertir columnas numéricas
+        df_procesado['Debito'] = pd.to_numeric(df_procesado['Debito'], errors='coerce')
+        df_procesado['Credito'] = pd.to_numeric(df_procesado['Credito'], errors='coerce')
         
         # Agrupar por fecha, nota, doc_num y tercero
-        columnas_agrupacion = ['Fecha', 'Nota', 'Doc Num', 'Tercero']
-        columnas_suma = ['Debito', 'Credito']
-        
-        # Verificar que todas las columnas necesarias existen
-        for col in columnas_agrupacion + columnas_suma:
-            if col not in df_procesado.columns:
-                st.error(f"Columna '{col}' no encontrada en el archivo")
-                st.write("Columnas disponibles:", list(df_procesado.columns))
-                return None
-        
-        df_agrupado = df_procesado.groupby(columnas_agrupacion).agg({
+        df_agrupado = df_procesado.groupby(['Fecha', 'Nota', 'Doc Num', 'Tercero']).agg({
             'Debito': 'sum',
             'Credito': 'sum',
             'Nit': 'first'
         }).reset_index()
         
-        # Mostrar resultado del procesamiento
+        # Mostrar resumen del procesamiento
         st.write("Resumen del procesamiento:")
         st.write(f"- Registros originales: {len(df_procesado)}")
         st.write(f"- Registros después de agrupar: {len(df_agrupado)}")
@@ -110,7 +94,6 @@ def procesar_libro_auxiliar(df):
     except Exception as e:
         st.error(f"Error en procesamiento del Libro Auxiliar: {str(e)}")
         st.write("Estructura del archivo original:")
-        st.write("Primeras 10 filas:")
         st.write(df.head(10))
         st.write("Columnas disponibles:", list(df.columns))
         return None
