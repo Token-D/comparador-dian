@@ -17,24 +17,23 @@ st.set_page_config(
 
 def procesar_token_dian(df):
     try:
-        # Crear una copia del DataFrame para no modificar el original
+        # Crear una copia del DataFrame
         df_procesado = df.copy()
         
-        # Filtrar solo los registros "Recibido" de la columna "Grupo"
+        # Filtrar registros
         df_procesado = df_procesado[df_procesado['Grupo'] == 'Recibido']
-        
-        # Quitar los registros "Application response" de "Tipo de documento"
         df_procesado = df_procesado[df_procesado['Tipo de documento'] != 'Application response']
         
-        # Procesar la columna "Folio" para quitar "NC" al inicio
+        # Procesar la columna "Folio"
         df_procesado['Folio'] = df_procesado['Folio'].apply(
             lambda x: x[2:] if isinstance(x, str) and x.startswith('NC') else x
         )
         
-        # Mostrar resumen del procesamiento
-        st.write("Resumen del procesamiento Token DIAN:")
-        st.write(f"- Registros originales: {len(df)}")
-        st.write(f"- Registros después del filtro: {len(df_procesado)}")
+        # Asegurar que 'Total' sea numérico
+        df_procesado['Total'] = pd.to_numeric(df_procesado['Total'], errors='coerce')
+        
+        # Asegurar que 'NIT Emisor' sea string
+        df_procesado['NIT Emisor'] = df_procesado['NIT Emisor'].astype(str)
         
         return df_procesado
         
@@ -99,34 +98,55 @@ def procesar_libro_auxiliar(df):
 
 def buscar_coincidencias(df_token, df_libro):
     try:
+        st.write("Iniciando búsqueda de coincidencias...")
+        
+        # Crear DataFrame para resultados
         resultados = df_token.copy()
         resultados['Doc_Num_Encontrado'] = 'Validar Manualmente'
         
-        # Primera búsqueda: coincidencia exacta de 3 campos
+        # Primera búsqueda: coincidencia exacta de NIT, Total y Folio
         for idx, row in resultados.iterrows():
+            # Buscar coincidencias
             coincidencias = df_libro[
                 (df_libro['Nit'] == str(row['NIT Emisor'])) &
-                (df_libro['Debito'] == row['Total']) &
-                (df_libro['Nota'].str.contains(str(row['Folio']), na=False))
+                (df_libro['Debitos'] == float(row['Total'])) &
+                df_libro['Nota'].str.contains(str(row['Folio']), na=False)
             ]
             
             if not coincidencias.empty:
                 resultados.at[idx, 'Doc_Num_Encontrado'] = coincidencias.iloc[0]['Doc Num']
                 continue
-                
-            # Segunda búsqueda: solo NIT y Folio
+            
+            # Si no se encuentra, buscar solo por NIT y Folio
             coincidencias = df_libro[
                 (df_libro['Nit'] == str(row['NIT Emisor'])) &
-                (df_libro['Nota'].str.contains(str(row['Folio']), na=False))
+                df_libro['Nota'].str.contains(str(row['Folio']), na=False)
             ]
             
             if not coincidencias.empty:
                 resultados.at[idx, 'Doc_Num_Encontrado'] = coincidencias.iloc[0]['Doc Num']
         
+        # Mostrar resumen de la búsqueda
+        total_registros = len(resultados)
+        encontrados = len(resultados[resultados['Doc_Num_Encontrado'] != 'Validar Manualmente'])
+        por_validar = total_registros - encontrados
+        
+        st.write("\nResumen de la búsqueda:")
+        st.write(f"- Total de registros: {total_registros}")
+        st.write(f"- Coincidencias encontradas: {encontrados}")
+        st.write(f"- Registros por validar manualmente: {por_validar}")
+        
+        # Mostrar muestra de los resultados
+        st.write("\nMuestra de los resultados:")
+        st.write(resultados.head())
+        
         return resultados
         
     except Exception as e:
         st.error(f"Error en búsqueda de coincidencias: {str(e)}")
+        st.write("Estructura de los DataFrames:")
+        st.write("Token DIAN:", df_token.columns.tolist())
+        st.write("Libro Auxiliar:", df_libro.columns.tolist())
         return None
 
 def crear_google_sheet(df, nombre_empresa):
