@@ -121,6 +121,9 @@ def buscar_coincidencias(df_token, df_libro):
         resultados['Debito_Libro'] = resultados['Debito_Libro'].round(1)
         resultados['Diferencia_Total'] = resultados['Diferencia_Total'].round(1)
         
+        # Reemplazar NaN con celdas vacías
+        resultados.fillna('', inplace=True)
+        
         # Ordenar por Diferencia_Total y Doc_Num_Encontrado
         resultados = resultados.sort_values(
             by=['Diferencia_Total', 'Doc_Num_Encontrado'],
