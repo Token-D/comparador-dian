@@ -116,19 +116,25 @@ def buscar_coincidencias(df_token, df_libro):
                 resultados.at[idx, 'Debito_Libro'] = coincidencias.iloc[0]['Debitos']
                 resultados.at[idx, 'Diferencia_Total'] = float(row['Total']) - coincidencias.iloc[0]['Debitos']
         
-        # Seleccionar y reordenar columnas para el resultado final
-        columnas_deseadas = [
+        # Mostrar las columnas disponibles para diagnóstico
+        st.write("Columnas disponibles en el DataFrame:", list(resultados.columns))
+        
+        # Seleccionar solo las columnas que existen
+        columnas_base = [
             'Folio', 'Fecha Emisión', 'NIT Emisor', 'Nombre Emisor', 
-            'Total', 'Moneda', 'Tipo de documento', 'Doc_Num_Encontrado',
+            'Total', 'Tipo de documento', 'Doc_Num_Encontrado',
             'Nota_Libro', 'Debito_Libro', 'Diferencia_Total'
         ]
         
-        resultados = resultados[columnas_deseadas]
+        # Filtrar solo las columnas que existen en el DataFrame
+        columnas_existentes = [col for col in columnas_base if col in resultados.columns]
+        resultados = resultados[columnas_existentes]
         
         return resultados
         
     except Exception as e:
         st.error(f"Error en búsqueda de coincidencias: {str(e)}")
+        st.write("Columnas disponibles:", list(df_token.columns))
         return None
 
 def crear_google_sheet(resultados, nombre_empresa):
