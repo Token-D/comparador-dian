@@ -104,7 +104,7 @@ def buscar_coincidencias(df_token, df_libro):
                 resultados.at[idx, 'Diferencia_Total'] = float(row['Total']) - coincidencias.iloc[0]['Debitos']
                 continue
             
-            # Búsqueda secundaria por NIT y Folio
+            # Búsqueda secundaria
             coincidencias = df_libro[
                 (df_libro['Nit'] == str(row['NIT Emisor'])) &
                 df_libro['Nota'].str.contains(str(row['Folio']), na=False)
@@ -116,30 +116,38 @@ def buscar_coincidencias(df_token, df_libro):
                 resultados.at[idx, 'Debito_Libro'] = coincidencias.iloc[0]['Debitos']
                 resultados.at[idx, 'Diferencia_Total'] = float(row['Total']) - coincidencias.iloc[0]['Debitos']
         
-        # Mostrar las columnas disponibles para diagnóstico
-        st.write("Columnas disponibles en el DataFrame:", list(resultados.columns))
+        # Redondear columnas numéricas a 1 decimal
+        resultados['Total'] = resultados['Total'].round(1)
+        resultados['Debito_Libro'] = resultados['Debito_Libro'].round(1)
+        resultados['Diferencia_Total'] = resultados['Diferencia_Total'].round(1)
         
-        # Seleccionar solo las columnas que existen
-        columnas_base = [
-            'Folio', 'Fecha Emisión', 'NIT Emisor', 'Nombre Emisor', 
-            'Total', 'Tipo de documento', 'Doc_Num_Encontrado',
+        # Ordenar por Diferencia_Total y Doc_Num_Encontrado
+        resultados = resultados.sort_values(
+            by=['Diferencia_Total', 'Doc_Num_Encontrado'],
+            ascending=[False, False],
+            na_position='last'
+        )
+        
+        # Seleccionar y ordenar columnas
+        columnas_ordenadas = [
+            'Tipo de documento', 'Folio', 'Prefijo', 'Fecha Emisión', 'NIT Emisor', 
+            'Nombre Emisor', 'NIT Receptor', 'Total', 'Doc_Num_Encontrado',
             'Nota_Libro', 'Debito_Libro', 'Diferencia_Total'
         ]
         
-        # Filtrar solo las columnas que existen en el DataFrame
-        columnas_existentes = [col for col in columnas_base if col in resultados.columns]
+        # Filtrar solo las columnas que existen
+        columnas_existentes = [col for col in columnas_ordenadas if col in resultados.columns]
         resultados = resultados[columnas_existentes]
         
         return resultados
         
     except Exception as e:
         st.error(f"Error en búsqueda de coincidencias: {str(e)}")
-        st.write("Columnas disponibles:", list(df_token.columns))
         return None
 
 def crear_google_sheet(resultados, nombre_empresa):
     try:
-        # Convertir DataFrame a string para evitar problemas de formato
+        # Convertir DataFrame a string para el sheet
         df_para_sheet = resultados.astype(str)
         
         # Crear nombre del archivo
@@ -154,10 +162,10 @@ def crear_google_sheet(resultados, nombre_empresa):
                    'https://www.googleapis.com/auth/drive']
         )
         
-        # Crear servicio de Google Sheets
+        # Crear servicio
         service = build('sheets', 'v4', credentials=credentials)
         
-        # Crear nuevo spreadsheet
+        # Crear spreadsheet
         spreadsheet = {
             'properties': {
                 'title': nombre_archivo
@@ -166,7 +174,7 @@ def crear_google_sheet(resultados, nombre_empresa):
         spreadsheet = service.spreadsheets().create(body=spreadsheet).execute()
         spreadsheet_id = spreadsheet.get('spreadsheetId')
         
-        # Preparar datos para escribir
+        # Preparar datos
         valores = [df_para_sheet.columns.tolist()] + df_para_sheet.values.tolist()
         
         # Escribir datos
@@ -180,13 +188,52 @@ def crear_google_sheet(resultados, nombre_empresa):
             body=body
         ).execute()
         
-        # Mover archivo a la carpeta específica
-        drive_service = build('drive', 'v3', credentials=credentials)
+        # Aplicar formato
+        requests = [
+            # Inmovilizar primera fila
+            {
+                "updateSheetProperties": {
+                    "properties": {
+                        "gridProperties": {
+                            "frozenRowCount": 1
+                        }
+                    },
+                    "fields": "gridProperties.frozenRowCount"
+                }
+            },
+            # Color verde claro para encabezados específicos
+            {
+                "repeatCell": {
+                    "range": {
+                        "startRowIndex": 0,
+                        "endRowIndex": 1,
+                        "startColumnIndex": 8,  # Columna I (Doc_Num_Encontrado)
+                        "endColumnIndex": 12    # Hasta la última columna
+                    },
+                    "cell": {
+                        "userEnteredFormat": {
+                            "backgroundColor": {
+                                "red": 0.85,
+                                "green": 0.92,
+                                "blue": 0.85
+                            }
+                        }
+                    },
+                    "fields": "userEnteredFormat.backgroundColor"
+                }
+            }
+        ]
         
-        # ID de la carpeta de destino (de la URL que proporcionaste)
+        # Aplicar formatos
+        service.spreadsheets().batchUpdate(
+            spreadsheetId=spreadsheet_id,
+            body={'requests': requests}
+        ).execute()
+        
+        # Mover a carpeta específica
+        drive_service = build('drive', 'v3', credentials=credentials)
         folder_id = '1Kup1_bWb2OTiuitmNE_zNurvplaLmerE'
         
-        # Actualizar la carpeta del archivo
         file = drive_service.files().update(
             fileId=spreadsheet_id,
             addParents=folder_id,
@@ -194,10 +241,7 @@ def crear_google_sheet(resultados, nombre_empresa):
             fields='id, parents'
         ).execute()
         
-        # Generar URL del archivo
-        sheet_url = f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}"
-        
-        return sheet_url
+        return f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}"
         
     except Exception as e:
         st.error(f"Error al crear Google Sheet: {str(e)}")
