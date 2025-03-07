@@ -45,68 +45,52 @@ def procesar_libro_auxiliar(df):
     try:
         st.write("Procesando Libro Auxiliar...")
         
-        # Obtener los nombres de las columnas de la fila 2 (índice 2)
+        # Obtener los nombres de las columnas de la fila 2
         nombres_columnas = df.iloc[2]
-        st.write("Nombres de columnas encontrados en fila 2:")
-        st.write(list(nombres_columnas))
         
-        # Crear nuevo DataFrame desde la fila 3 en adelante (índice 3)
+        # Crear nuevo DataFrame desde la fila 3
         df_procesado = df.iloc[3:].copy()
-        
-        # Asignar los nombres de las columnas
         df_procesado.columns = nombres_columnas
-        
-        # Resetear el índice
         df_procesado = df_procesado.reset_index(drop=True)
         
         # Convertir columnas numéricas
         df_procesado['Debitos'] = pd.to_numeric(df_procesado['Debitos'], errors='coerce')
         df_procesado['Creditos'] = pd.to_numeric(df_procesado['Creditos'], errors='coerce')
         
-        # Extraer NIT de la columna Tercero
+        # Extraer NIT
         df_procesado['Nit'] = df_procesado['Tercero'].str.extract(r'Nit:\s*(\d+)')
         
-        # Agrupar solo por Doc Num
-        df_agrupado = df_procesado.groupby('Doc Num', dropna=False).agg({
+        # Agrupar por Doc Num y Nota
+        df_agrupado = df_procesado.groupby(['Doc Num', 'Nota'], dropna=False).agg({
             'Debitos': 'sum',
             'Creditos': 'sum',
-            'Tercero': 'first',  # Mantener el primer tercero
-            'Nit': 'first',      # Mantener el primer NIT
-            'Nota': 'first'      # Mantener la primera nota
+            'Tercero': 'first',
+            'Nit': 'first'
         }).reset_index()
         
         # Eliminar filas donde Doc Num es NaN o vacío
         df_agrupado = df_agrupado[df_agrupado['Doc Num'].notna() & (df_agrupado['Doc Num'] != '')]
         
-        # Mostrar resumen del procesamiento
-        st.write("\nResumen del procesamiento:")
-        st.write(f"- Registros originales: {len(df_procesado)}")
-        st.write(f"- Registros después de agrupar: {len(df_agrupado)}")
-        
-        # Mostrar muestra de los resultados
-        st.write("\nMuestra de los resultados agrupados:")
-        st.write(df_agrupado.head())
-        
         return df_agrupado
         
     except Exception as e:
         st.error(f"Error en procesamiento del Libro Auxiliar: {str(e)}")
-        st.write("Estructura del archivo original:")
-        st.write(df.head(10))
-        st.write("Total de filas en el archivo:", len(df))
         return None
 
 def buscar_coincidencias(df_token, df_libro):
     try:
-        st.write("Iniciando búsqueda de coincidencias...")
-        
         # Crear DataFrame para resultados
         resultados = df_token.copy()
         resultados['Doc_Num_Encontrado'] = 'Validar Manualmente'
+        resultados['Nota_Libro'] = ''
+        resultados['Debito_Libro'] = np.nan
+        resultados['Diferencia_Total'] = np.nan
         
-        # Primera búsqueda: coincidencia exacta de NIT, Total y Folio
+        # Convertir fecha a formato DD/MM/AAAA
+        resultados['Fecha Emisión'] = pd.to_datetime(resultados['Fecha Emisión']).dt.strftime('%d/%m/%Y')
+        
+        # Búsqueda de coincidencias
         for idx, row in resultados.iterrows():
-            # Buscar coincidencias
             coincidencias = df_libro[
                 (df_libro['Nit'] == str(row['NIT Emisor'])) &
                 (df_libro['Debitos'] == float(row['Total'])) &
@@ -115,9 +99,12 @@ def buscar_coincidencias(df_token, df_libro):
             
             if not coincidencias.empty:
                 resultados.at[idx, 'Doc_Num_Encontrado'] = coincidencias.iloc[0]['Doc Num']
+                resultados.at[idx, 'Nota_Libro'] = coincidencias.iloc[0]['Nota']
+                resultados.at[idx, 'Debito_Libro'] = coincidencias.iloc[0]['Debitos']
+                resultados.at[idx, 'Diferencia_Total'] = float(row['Total']) - coincidencias.iloc[0]['Debitos']
                 continue
             
-            # Si no se encuentra, buscar solo por NIT y Folio
+            # Búsqueda secundaria por NIT y Folio
             coincidencias = df_libro[
                 (df_libro['Nit'] == str(row['NIT Emisor'])) &
                 df_libro['Nota'].str.contains(str(row['Folio']), na=False)
@@ -125,28 +112,23 @@ def buscar_coincidencias(df_token, df_libro):
             
             if not coincidencias.empty:
                 resultados.at[idx, 'Doc_Num_Encontrado'] = coincidencias.iloc[0]['Doc Num']
+                resultados.at[idx, 'Nota_Libro'] = coincidencias.iloc[0]['Nota']
+                resultados.at[idx, 'Debito_Libro'] = coincidencias.iloc[0]['Debitos']
+                resultados.at[idx, 'Diferencia_Total'] = float(row['Total']) - coincidencias.iloc[0]['Debitos']
         
-        # Mostrar resumen de la búsqueda
-        total_registros = len(resultados)
-        encontrados = len(resultados[resultados['Doc_Num_Encontrado'] != 'Validar Manualmente'])
-        por_validar = total_registros - encontrados
+        # Seleccionar y reordenar columnas para el resultado final
+        columnas_deseadas = [
+            'Folio', 'Fecha Emisión', 'NIT Emisor', 'Nombre Emisor', 
+            'Total', 'Moneda', 'Tipo de documento', 'Doc_Num_Encontrado',
+            'Nota_Libro', 'Debito_Libro', 'Diferencia_Total'
+        ]
         
-        st.write("\nResumen de la búsqueda:")
-        st.write(f"- Total de registros: {total_registros}")
-        st.write(f"- Coincidencias encontradas: {encontrados}")
-        st.write(f"- Registros por validar manualmente: {por_validar}")
-        
-        # Mostrar muestra de los resultados
-        st.write("\nMuestra de los resultados:")
-        st.write(resultados.head())
+        resultados = resultados[columnas_deseadas]
         
         return resultados
         
     except Exception as e:
         st.error(f"Error en búsqueda de coincidencias: {str(e)}")
-        st.write("Estructura de los DataFrames:")
-        st.write("Token DIAN:", df_token.columns.tolist())
-        st.write("Libro Auxiliar:", df_libro.columns.tolist())
         return None
 
 def crear_google_sheet(resultados, nombre_empresa):
