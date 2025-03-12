@@ -169,12 +169,9 @@ def crear_google_sheet(resultados, nombre_empresa):
         service = build('sheets', 'v4', credentials=credentials)
         
         # Crear spreadsheet
-        spreadsheet = {
-            'properties': {
-                'title': nombre_archivo
-            }
-        }
-        spreadsheet = service.spreadsheets().create(body=spreadsheet).execute()
+        spreadsheet = sheets_service.spreadsheets().create(body={
+            'properties': {'title': nombre_archivo}
+        }).execute()
         spreadsheet_id = spreadsheet.get('spreadsheetId')
         
         # Preparar datos
@@ -234,14 +231,24 @@ def crear_google_sheet(resultados, nombre_empresa):
         ).execute()
         
         # Mover a carpeta específica
-        drive_service = build('drive', 'v3', credentials=credentials)
-        folder_id = '1Kup1_bWb2OTiuitmNE_zNurvplaLmerE'
-        
-        file = drive_service.files().update(
+        folder_id = '1Kup1_bWb2OTiuitmNE_zNurvplaLmerE'  # ID de la carpeta destino
+        drive_service.files().update(
             fileId=spreadsheet_id,
             addParents=folder_id,
             removeParents='root',
             fields='id, parents'
+        ).execute()
+                
+        # Compartir con el usuario específico
+        permiso = {
+            'type': 'user',
+            'role': 'writer',
+            'emailAddress': 'lkaterinmarin@gmail.com'
+        }
+        drive_service.permissions().create(
+            fileId=spreadsheet_id,
+            body=permiso,
+            fields='id'
         ).execute()
         
         return f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}"
