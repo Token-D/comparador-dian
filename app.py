@@ -267,5 +267,75 @@ def crear_google_sheet(resultados, nombre_empresa, user_email):
         st.error(f"Error al crear Google Sheet: {str(e)}")
         return None
 
+def main():
+    st.title('🔄 Comparador Token DIAN y Libro Auxiliar')
+    
+    # Sidebar con instrucciones
+    with st.sidebar:
+        st.header("Instrucciones")
+        st.write("""
+        1. Ingrese el nombre de la empresa
+        2. Cargue el archivo Token DIAN
+        3. Cargue el archivo Libro Auxiliar
+        4. El sistema procesará los archivos y generará un Google Sheet con los resultados
+        """)
+    
+    # Campo para nombre de empresa
+    nombre_empresa = st.text_input('Nombre de la empresa:', 
+                                 help='Este nombre se usará para generar el archivo de resultados')
+
+    # Agregar campo para el correo del usuario
+    user_email = st.text_input('Correo electrónico del usuario:', 
+                              help="Se usará para dar acceso al archivo.")
+    
+    # Carga de archivos
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.subheader("Token DIAN")
+        archivo_token = st.file_uploader("Cargar archivo Token DIAN", type=['xlsx'])
+        
+    with col2:
+        st.subheader("Libro Auxiliar")
+        archivo_libro = st.file_uploader("Cargar archivo Libro Auxiliar", type=['xlsx'])
+    
+    # Verificar que todos los campos necesarios estén completos
+    if archivo_token and archivo_libro and nombre_empresa and user_email:
+        if st.button('Procesar archivos'):
+            with st.spinner('Procesando archivos...'):
+                try:
+                    # Leer archivos
+                    df_token = pd.read_excel(archivo_token)
+                    df_libro = pd.read_excel(archivo_libro)
+
+                    # Procesar datos
+                    df_token_proc = procesar_token_dian(df_token)
+                    df_libro_proc = procesar_libro_auxiliar(df_libro)
+
+                    if df_token_proc is not None and df_libro_proc is not None:
+                        resultados = buscar_coincidencias(df_token_proc, df_libro_proc)
+
+                        if resultados is not None:
+                            st.success("¡Procesamiento completado!")
+
+                            # Crear Google Sheet y compartir con el usuario
+                            link_sheet = crear_google_sheet(resultados, nombre_empresa, user_email)
+
+                            if link_sheet:
+                                st.success("¡Archivo creado exitosamente!")
+                                st.write("Link al archivo de resultados:")
+                                st.markdown(f"[Abrir Google Sheet]({link_sheet})")
+                            else:
+                                st.error("No se pudo crear el archivo en Google Sheets.")
+                        else:
+                            st.error("Error al buscar coincidencias en los datos.")
+                    else:
+                        st.error("Error al procesar los archivos.")
+
+                except Exception as e:
+                    st.error(f"Error en el procesamiento: {str(e)}")
+    else:
+        st.info("Por favor, complete todos los campos y cargue los archivos necesarios.")
+
 if __name__ == "__main__":
     main()
