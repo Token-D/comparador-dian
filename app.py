@@ -148,7 +148,7 @@ def buscar_coincidencias(df_token, df_libro):
         st.error(f"Error en búsqueda de coincidencias: {str(e)}")
         return None
 
-def crear_google_sheet(resultados, nombre_empresa):
+def crear_google_sheet(resultados, nombre_empresa, user_email):
     try:
         # Convertir DataFrame a string para el sheet
         df_para_sheet = resultados.astype(str)
@@ -165,8 +165,9 @@ def crear_google_sheet(resultados, nombre_empresa):
                    'https://www.googleapis.com/auth/drive']
         )
         
-        # Crear servicio
-        service = build('sheets', 'v4', credentials=credentials)
+        # Crear servicios de Sheets y Drive
+        sheets_service = build('sheets', 'v4', credentials=credentials)
+        drive_service = build('drive', 'v3', credentials=credentials)
         
         # Crear spreadsheet
         spreadsheet = sheets_service.spreadsheets().create(body={
@@ -181,7 +182,7 @@ def crear_google_sheet(resultados, nombre_empresa):
         body = {
             'values': valores
         }
-        service.spreadsheets().values().update(
+        sheets_service.spreadsheets().values().update(
             spreadsheetId=spreadsheet_id,
             range='Sheet1!A1',
             valueInputOption='RAW',
@@ -190,7 +191,6 @@ def crear_google_sheet(resultados, nombre_empresa):
         
         # Aplicar formato
         requests = [
-            # Inmovilizar primera fila
             {
                 "updateSheetProperties": {
                     "properties": {
@@ -201,14 +201,13 @@ def crear_google_sheet(resultados, nombre_empresa):
                     "fields": "gridProperties.frozenRowCount"
                 }
             },
-            # Color verde claro para encabezados específicos
             {
                 "repeatCell": {
                     "range": {
                         "startRowIndex": 0,
                         "endRowIndex": 1,
-                        "startColumnIndex": 8,  # Columna I (Doc_Num_Encontrado)
-                        "endColumnIndex": 12    # Hasta la última columna
+                        "startColumnIndex": 8,
+                        "endColumnIndex": 12
                     },
                     "cell": {
                         "userEnteredFormat": {
@@ -225,95 +224,48 @@ def crear_google_sheet(resultados, nombre_empresa):
         ]
         
         # Aplicar formatos
-        service.spreadsheets().batchUpdate(
+        sheets_service.spreadsheets().batchUpdate(
             spreadsheetId=spreadsheet_id,
             body={'requests': requests}
         ).execute()
         
         # Mover a carpeta específica
-        folder_id = '1Kup1_bWb2OTiuitmNE_zNurvplaLmerE'  # ID de la carpeta destino
+        folder_id = '1Kup1_bWb2OTiuitmNE_zNurvplaLmerE'
         drive_service.files().update(
             fileId=spreadsheet_id,
             addParents=folder_id,
             removeParents='root',
             fields='id, parents'
         ).execute()
-                
-        # Compartir con el usuario específico
-        permiso = {
-            'type': 'user',
-            'role': 'writer',
-            'emailAddress': 'lkaterinmarin@gmail.com'
+        
+        # Configurar permisos para cualquier persona con el enlace
+        domain_permission = {
+            'type': 'anyone',
+            'role': 'reader'
         }
         drive_service.permissions().create(
             fileId=spreadsheet_id,
-            body=permiso,
-            fields='id'
+            body=domain_permission
         ).execute()
+        
+        # Dar permisos de edición al usuario específico
+        if user_email:
+            user_permission = {
+                'type': 'user',
+                'role': 'writer',
+                'emailAddress': user_email
+            }
+            drive_service.permissions().create(
+                fileId=spreadsheet_id,
+                body=user_permission,
+                sendNotificationEmail=True
+            ).execute()
         
         return f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}"
         
     except Exception as e:
         st.error(f"Error al crear Google Sheet: {str(e)}")
         return None
-
-def main():
-    st.title('🔄 Comparador Token DIAN y Libro Auxiliar')
-    
-    # Sidebar con instrucciones
-    with st.sidebar:
-        st.header("Instrucciones")
-        st.write("""
-        1. Ingrese el nombre de la empresa
-        2. Cargue el archivo Token DIAN
-        3. Cargue el archivo Libro Auxiliar
-        4. El sistema procesará los archivos y generará un Google Sheet con los resultados
-        """)
-    
-    # Campo para nombre de empresa
-    nombre_empresa = st.text_input('Nombre de la empresa:', 
-                                 help='Este nombre se usará para generar el archivo de resultados')
-
-    # Agregar campo para el correo del usuario que generará el archivo
-    user_email = st.text_input('Correo electrónico del usuario:', help="Se usará para dar acceso al archivo.")
-    
-    # Carga de archivos
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.subheader("Token DIAN")
-        archivo_token = st.file_uploader("Cargar archivo Token DIAN", type=['xlsx'])
-        
-    with col2:
-        st.subheader("Libro Auxiliar")
-        archivo_libro = st.file_uploader("Cargar archivo Libro Auxiliar", type=['xlsx'])
-    
-    if archivo_token and archivo_libro and nombre_empresa and user_email:
-    if st.button('Procesar archivos'):
-        with st.spinner('Procesando archivos...'):
-            try:
-                df_token = pd.read_excel(archivo_token)
-                df_libro = pd.read_excel(archivo_libro)
-
-                df_token_proc = procesar_token_dian(df_token)
-                df_libro_proc = procesar_libro_auxiliar(df_libro)
-
-                if df_token_proc is not None and df_libro_proc is not None:
-                    resultados = buscar_coincidencias(df_token_proc, df_libro_proc)
-
-                    if resultados is not None:
-                        st.success("¡Procesamiento completado!")
-
-                        # 🔹 Crear Google Sheet y compartir con el usuario
-                        link_sheet = crear_google_sheet(resultados, nombre_empresa, user_email)
-
-                        if link_sheet:
-                            st.success("¡Archivo creado exitosamente!")
-                            st.write("Link al archivo de resultados:")
-                            st.markdown(f"[Abrir Google Sheet]({link_sheet})")
-
-            except Exception as e:
-                st.error(f"Error en el procesamiento: {str(e)}")
 
 if __name__ == "__main__":
     main()
