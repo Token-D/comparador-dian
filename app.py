@@ -273,6 +273,9 @@ def main():
     # Campo para nombre de empresa
     nombre_empresa = st.text_input('Nombre de la empresa:', 
                                  help='Este nombre se usará para generar el archivo de resultados')
+
+    # Agregar campo para el correo del usuario que generará el archivo
+    user_email = st.text_input('Correo electrónico del usuario:', help="Se usará para dar acceso al archivo.")
     
     # Carga de archivos
     col1, col2 = st.columns(2)
@@ -285,33 +288,32 @@ def main():
         st.subheader("Libro Auxiliar")
         archivo_libro = st.file_uploader("Cargar archivo Libro Auxiliar", type=['xlsx'])
     
-    if archivo_token and archivo_libro and nombre_empresa:
-        if st.button('Procesar archivos'):
-            with st.spinner('Procesando archivos...'):
-                try:
-                    # Cargar y procesar archivos
-                    df_token = pd.read_excel(archivo_token)
-                    df_libro = pd.read_excel(archivo_libro)
-                    
-                    df_token_proc = procesar_token_dian(df_token)
-                    df_libro_proc = procesar_libro_auxiliar(df_libro)
-                    
-                    if df_token_proc is not None and df_libro_proc is not None:
-                        resultados = buscar_coincidencias(df_token_proc, df_libro_proc)
-                        
-                        if resultados is not None:
-                            st.success("¡Procesamiento completado!")
-                            
-                            # Crear Google Sheet y obtener link
-                            link_sheet = crear_google_sheet(resultados, nombre_empresa)
-                            
-                            if link_sheet:
-                                st.success("¡Archivo creado exitosamente!")
-                                st.write("Link al archivo de resultados:")
-                                st.markdown(f"[Abrir Google Sheet]({link_sheet})")
-                
-                except Exception as e:
-                    st.error(f"Error en el procesamiento: {str(e)}")
+    if archivo_token and archivo_libro and nombre_empresa and user_email:
+    if st.button('Procesar archivos'):
+        with st.spinner('Procesando archivos...'):
+            try:
+                df_token = pd.read_excel(archivo_token)
+                df_libro = pd.read_excel(archivo_libro)
+
+                df_token_proc = procesar_token_dian(df_token)
+                df_libro_proc = procesar_libro_auxiliar(df_libro)
+
+                if df_token_proc is not None and df_libro_proc is not None:
+                    resultados = buscar_coincidencias(df_token_proc, df_libro_proc)
+
+                    if resultados is not None:
+                        st.success("¡Procesamiento completado!")
+
+                        # 🔹 Crear Google Sheet y compartir con el usuario
+                        link_sheet = crear_google_sheet(resultados, nombre_empresa, user_email)
+
+                        if link_sheet:
+                            st.success("¡Archivo creado exitosamente!")
+                            st.write("Link al archivo de resultados:")
+                            st.markdown(f"[Abrir Google Sheet]({link_sheet})")
+
+            except Exception as e:
+                st.error(f"Error en el procesamiento: {str(e)}")
 
 if __name__ == "__main__":
     main()
