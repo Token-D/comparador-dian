@@ -5,4 +5,7 @@ numpy
 google-auth
 google-auth-oauthlib
 google-auth-httplib2
+google-oauth2
 google-api-python-client
+PyYAML
+streamlit-authenticator
