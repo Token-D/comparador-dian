@@ -3,8 +3,9 @@ pandas
 numpy
 openpyxl
 PyYAML
+# Cambiar esta linea por la version especifica
+streamlit-authenticator==0.2.2 
 google-api-python-client
 google-oauth2
 google-auth
 google-auth-httplib2
-streamlit-authenticator==0.2.2  # Usar una versión probada
