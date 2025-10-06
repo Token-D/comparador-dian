@@ -8,11 +8,31 @@ from googleapiclient.discovery import build
 from io import BytesIO
 import re
 
+import streamlit_authenticator as stauth
+from yaml.loader import SafeLoader
+import yaml
+
 # Configuración de la página
 st.set_page_config(
     page_title="Comparador DIAN",
     page_icon="📊",
     layout="wide"
+)
+
+# Cargar las credenciales del archivo config.yaml
+try:
+    with open('config.yaml') as file:
+        config = yaml.load(file, Loader=SafeLoader)
+except FileNotFoundError:
+    st.error("Error: Archivo 'config.yaml' no encontrado. Asegúrate de crearlo.")
+    st.stop()
+    
+# Crear el objeto Authenticate
+authenticator = stauth.Authenticate(
+    config['credentials'],
+    config['cookie']['name'],
+    config['cookie']['key'],
+    config['cookie']['expiry_days']
 )
 
 def procesar_token_dian(df):
@@ -268,6 +288,20 @@ def crear_google_sheet(resultados, nombre_empresa, user_email):
         return None
 
 def main():
+
+    # 1. Mostrar el formulario de inicio de sesión
+    name, authentication_status, username = authenticator.login('Iniciar Sesión', 'main')
+    
+    # 2. Control de flujo de autenticación
+    
+    if authentication_status:
+        # ----------------------------------------------------------------------
+        # A. CÓDIGO DE LA APLICACIÓN (SOLO SE MUESTRA SI ESTÁ LOGUEADO)
+        # ----------------------------------------------------------------------
+        
+        # Muestra el botón de cerrar sesión en el sidebar y el saludo
+        authenticator.logout('Cerrar Sesión', 'sidebar')
+        st.sidebar.title(f"Bienvenido, {name}")
     st.title('🔄 Comparador Token DIAN y Libro Auxiliar')
     
     # Sidebar con instrucciones
@@ -337,5 +371,13 @@ def main():
     else:
         st.info("Por favor, complete todos los campos y cargue los archivos necesarios.")
 
+    elif authentication_status is False:
+        st.error('Usuario o Contraseña incorrectos')
+        
+    elif authentication_status is None:
+        st.info('Por favor, ingresa tu usuario y contraseña para continuar.')
+
+
 if __name__ == "__main__":
+
     main()
