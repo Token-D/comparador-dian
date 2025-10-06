@@ -2,11 +2,9 @@ streamlit
 pandas
 numpy
 openpyxl
-PyYAML==6.0.1
-# Cambiar esta linea por la version especifica
-streamlit-authenticator==0.2.2 
 google-api-python-client
 google-oauth2
 google-auth
 google-auth-httplib2
-bcrypt
+
+
