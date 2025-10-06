@@ -1,6 +1,0 @@
-# .streamlit/config.toml
-[server]
-# Define el usuario y la contraseña (¡Cámbialos!)
-# Streamlit Cloud te pedirá estas credenciales ANTES de ejecutar el código.
-username = "CONTADORA"
-password = "contadora"
