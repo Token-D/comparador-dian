@@ -7,7 +7,8 @@ google-auth-oauthlib
 google-auth-httplib2
 google-oauth2
 google-api-python-client
-PyYAML==6.0.1  # Versión estable y compatible
+PyYAML==6.0.1
 streamlit-authenticator
+
 
 
