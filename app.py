@@ -288,20 +288,7 @@ def crear_google_sheet(resultados, nombre_empresa, user_email):
         return None
 
 def main():
-    # 1. Mostrar el formulario de inicio de sesión
-    name, authentication_status, username = authenticator.login('Iniciar Sesión', 'main')
-    
-    # 2. Control de flujo de autenticación
-    
-    if authentication_status:
-        # ----------------------------------------------------------------------
-        # A. CÓDIGO DE LA APLICACIÓN (SOLO SE MUESTRA SI ESTÁ LOGUEADO)
-        # ----------------------------------------------------------------------
-        
-        # Muestra el botón de cerrar sesión en el sidebar y el saludo
-        authenticator.logout('Cerrar Sesión', 'sidebar')
-        st.sidebar.title(f"Bienvenido, {name}")
-        
+           
         st.title('🔄 Comparador Token DIAN y Libro Auxiliar')
         
         # Sidebar con instrucciones (ahora debajo del logout)
@@ -385,6 +372,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
