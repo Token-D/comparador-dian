@@ -1,14 +1,14 @@
 streamlit
 pandas
-openpyxl
 numpy
-google-auth
-google-auth-oauthlib
-google-auth-httplib2
-google-oauth2
-google-api-python-client
-PyYAML==6.0.1
+openpyxl
+Pyyaml
 streamlit-authenticator
+google-api-python-client
+google-oauth2
+google-auth
+google-auth-httplib2
+
 
 
 
