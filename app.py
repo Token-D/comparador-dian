@@ -376,13 +376,14 @@ def main():
     # ----------------------------------------------------------------------
     # B. MENSAJES PARA USUARIOS NO AUTENTICADOS
     # ----------------------------------------------------------------------
-    elif authentication_status is False:
+    elif: authentication_status is False:
         st.error('Usuario o Contraseña incorrectos')
         
-    elif authentication_status is None:
+    elif: authentication_status is None:
         st.info('Por favor, ingresa tu usuario y contraseña para continuar.')
 
 
 if __name__ == "__main__":
     main()
+
 
