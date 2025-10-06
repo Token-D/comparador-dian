@@ -1,0 +1,16 @@
+# config.yaml
+cookie:
+  name: 'comparador_dian_cookie'
+  key: 'tu_clave_secreta_aqui_debes_cambiarla_por_una_larga' # ⬅️ ¡CAMBIA ESTO!
+  expiry_days: 30
+
+credentials:
+  usernames:
+    usuario1:
+      email: "usuario1@empresa.com"
+      name: "Usuario Estándar"
+      password: "$2b$12$HASH_DE_TU_CONTRASEÑA_1" # ⬅️ ¡REEMPLAZA ESTE HASH!
+    admin:
+      email: "admin@empresa.com"
+      name: "Administrador"
+      password: "$2b$12$HASH_DE_TU_CONTRASEÑA_2" # ⬅️ ¡REEMPLAZA ESTE HASH!
