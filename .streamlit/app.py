@@ -268,9 +268,6 @@ def crear_google_sheet(resultados, nombre_empresa, user_email):
         return None
 
 def main():
-    # El servidor Streamlit se encarga de la autenticación HTTP,
-    # por lo tanto, el código de la app se ejecuta directamente.
-
     st.title('🔄 Comparador Token DIAN y Libro Auxiliar')
     
     # Sidebar con instrucciones
@@ -284,12 +281,12 @@ def main():
         """)
     
     # Campo para nombre de empresa
-    nombre_empresa = st.text_input('Nombre de la empresa:',
-                                    help='Este nombre se usará para generar el archivo de resultados')
+    nombre_empresa = st.text_input('Nombre de la empresa:', 
+                                 help='Este nombre se usará para generar el archivo de resultados')
 
     # Agregar campo para el correo del usuario
-    user_email = st.text_input('Correo electrónico del usuario:',
-                                help="Se usará para dar acceso al archivo.")
+    user_email = st.text_input('Correo electrónico del usuario:', 
+                              help="Se usará para dar acceso al archivo.")
     
     # Carga de archivos
     col1, col2 = st.columns(2)
@@ -339,7 +336,6 @@ def main():
                     st.error(f"Error en el procesamiento: {str(e)}")
     else:
         st.info("Por favor, complete todos los campos y cargue los archivos necesarios.")
-    
 
 if __name__ == "__main__":
     main()
