@@ -2,5 +2,5 @@
 [server]
 # Define el usuario y la contraseña (¡Cámbialos!)
 # Streamlit Cloud te pedirá estas credenciales ANTES de ejecutar el código.
-username = "tu_usuario_seguro"
-password = "tu_contraseña_segura"
+username = "CONTADORA"
+password = "contadora"
