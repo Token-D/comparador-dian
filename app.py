@@ -8,31 +8,11 @@ from googleapiclient.discovery import build
 from io import BytesIO
 import re
 
-import streamlit_authenticator as stauth
-from yaml.loader import SafeLoader
-import yaml
-
 # Configuración de la página
 st.set_page_config(
     page_title="Comparador DIAN",
     page_icon="📊",
     layout="wide"
-)
-
-# Cargar las credenciales del archivo config.yaml
-try:
-    with open('config.yaml') as file:
-        config = yaml.load(file, Loader=SafeLoader)
-except FileNotFoundError:
-    st.error("Error: Archivo 'config.yaml' no encontrado. Asegúrate de crearlo.")
-    st.stop()
-    
-# Crear el objeto Authenticate
-authenticator = stauth.Authenticate(
-    config['credentials'],
-    config['cookie']['name'],
-    config['cookie']['key'],
-    config['cookie']['expiry_days']
 )
 
 def procesar_token_dian(df):
@@ -372,6 +352,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
