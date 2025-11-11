@@ -3,8 +3,6 @@ import pandas as pd
 import numpy as np
 from datetime import datetime
 import random
-from google.oauth2 import service_account
-from googleapiclient.discovery import build
 from io import BytesIO
 import re
 
@@ -148,124 +146,54 @@ def buscar_coincidencias(df_token, df_libro):
         st.error(f"Error en búsqueda de coincidencias: {str(e)}")
         return None
 
-def crear_google_sheet(resultados, nombre_empresa, user_email):
-    try:
-        # Convertir DataFrame a string para el sheet
-        df_para_sheet = resultados.astype(str)
+def to_excel(df, nombre_empresa):
+    """
+    Convierte el DataFrame de resultados a un archivo Excel en un buffer (BytesIO).
+    """
+    output = BytesIO()
+    # Usar el motor 'xlsxwriter' para aplicar el formato que se hacía en Google Sheets
+    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+        df.to_excel(writer, index=False, sheet_name='Resultados')
         
-        # Crear nombre del archivo
-        fecha_actual = datetime.now().strftime('%Y%m%d')
-        numero_aleatorio = random.randint(1000, 9999)
-        nombre_archivo = f"{nombre_empresa}_{fecha_actual}_{numero_aleatorio}"
+        # Aplicar formato (similar al de Google Sheets: fila de encabezado congelada y columnas resaltadas)
+        workbook = writer.book
+        worksheet = writer.sheets['Resultados']
         
-        # Configurar credenciales
-        credentials = service_account.Credentials.from_service_account_info(
-            st.secrets["gcp_service_account"],
-            scopes=['https://www.googleapis.com/auth/spreadsheets',
-                   'https://www.googleapis.com/auth/drive']
-        )
+        # Formato de color para las columnas de coincidencia (índices 8 a 11: Doc_Num_Encontrado a Diferencia_Total)
+        header_format = workbook.add_format({
+            'bg_color': '#D9F2D9', # Verde claro (similar al 0.85, 0.92, 0.85)
+            'bold': True,
+            'border': 1
+        })
         
-        # Crear servicios de Sheets y Drive
-        sheets_service = build('sheets', 'v4', credentials=credentials)
-        drive_service = build('drive', 'v3', credentials=credentials)
+        # Formato básico para las demás celdas de encabezado
+        default_header_format = workbook.add_format({'bold': True, 'border': 1})
         
-        # Crear spreadsheet
-        spreadsheet = sheets_service.spreadsheets().create(body={
-            'properties': {'title': nombre_archivo}
-        }).execute()
-        spreadsheet_id = spreadsheet.get('spreadsheetId')
+        # Congelar la fila superior
+        worksheet.freeze_panes(1, 0)
         
-        # Preparar datos
-        valores = [df_para_sheet.columns.tolist()] + df_para_sheet.values.tolist()
+        # Escribir encabezados con formato
+        for col_num, value in enumerate(df.columns.values):
+            if 8 <= col_num <= 11: # Columnas 9, 10, 11, 12 (índices 8, 9, 10, 11)
+                worksheet.write(0, col_num, value, header_format)
+            else:
+                worksheet.write(0, col_num, value, default_header_format)
         
-        # Escribir datos
-        body = {
-            'values': valores
-        }
-        sheets_service.spreadsheets().values().update(
-            spreadsheetId=spreadsheet_id,
-            range='Sheet1!A1',
-            valueInputOption='RAW',
-            body=body
-        ).execute()
-        
-        # Aplicar formato
-        requests = [
-            {
-                "updateSheetProperties": {
-                    "properties": {
-                        "gridProperties": {
-                            "frozenRowCount": 1
-                        }
-                    },
-                    "fields": "gridProperties.frozenRowCount"
-                }
-            },
-            {
-                "repeatCell": {
-                    "range": {
-                        "startRowIndex": 0,
-                        "endRowIndex": 1,
-                        "startColumnIndex": 8,
-                        "endColumnIndex": 12
-                    },
-                    "cell": {
-                        "userEnteredFormat": {
-                            "backgroundColor": {
-                                "red": 0.85,
-                                "green": 0.92,
-                                "blue": 0.85
-                            }
-                        }
-                    },
-                    "fields": "userEnteredFormat.backgroundColor"
-                }
-            }
-        ]
-        
-        # Aplicar formatos
-        sheets_service.spreadsheets().batchUpdate(
-            spreadsheetId=spreadsheet_id,
-            body={'requests': requests}
-        ).execute()
-        
-        # Mover a carpeta específica
-        folder_id = '1Kup1_bWb2OTiuitmNE_zNurvplaLmerE'
-        drive_service.files().update(
-            fileId=spreadsheet_id,
-            addParents=folder_id,
-            removeParents='root',
-            fields='id, parents'
-        ).execute()
-        
-        # Configurar permisos para cualquier persona con el enlace
-        domain_permission = {
-            'type': 'anyone',
-            'role': 'reader'
-        }
-        drive_service.permissions().create(
-            fileId=spreadsheet_id,
-            body=domain_permission
-        ).execute()
-        
-        # Dar permisos de edición al usuario específico
-        if user_email:
-            user_permission = {
-                'type': 'user',
-                'role': 'writer',
-                'emailAddress': user_email
-            }
-            drive_service.permissions().create(
-                fileId=spreadsheet_id,
-                body=user_permission,
-                sendNotificationEmail=True
-            ).execute()
-        
-        return f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}"
-        
-    except Exception as e:
-        st.error(f"Error al crear Google Sheet: {str(e)}")
-        return None
+        # Ajuste de ancho de columnas simple
+        for i, col in enumerate(df.columns):
+            max_len = max(df[col].astype(str).apply(len).max(), len(col)) + 2
+            worksheet.set_column(i, i, max_len)
+            
+    processed_data = output.getvalue()
+    
+    # Crear nombre del archivo
+    fecha_actual = datetime.now().strftime('%Y%m%d')
+    numero_aleatorio = random.randint(1000, 9999)
+    nombre_archivo = f"{nombre_empresa}_Comparacion_{fecha_actual}_{numero_aleatorio}.xlsx"
+    
+    return processed_data, nombre_archivo
+
+# --- Función MAIN modificada ---
 
 def main():
     st.title('🔄 Comparador Token DIAN y Libro Auxiliar')
@@ -274,20 +202,17 @@ def main():
     with st.sidebar:
         st.header("Instrucciones")
         st.write("""
-        1. Ingrese el nombre de la empresa
-        2. Cargue el archivo Token DIAN
-        3. Cargue el archivo Libro Auxiliar
-        4. El sistema procesará los archivos y generará un Google Sheet con los resultados
+        1. Ingrese el **nombre de la empresa**
+        2. Cargue el archivo **Token DIAN**
+        3. Cargue el archivo **Libro Auxiliar**
+        4. El sistema procesará los archivos y generará un **botón de descarga** del Excel con los resultados.
         """)
     
     # Campo para nombre de empresa
     nombre_empresa = st.text_input('Nombre de la empresa:', 
                                  help='Este nombre se usará para generar el archivo de resultados')
 
-    # Agregar campo para el correo del usuario
-    user_email = st.text_input('Correo electrónico del usuario:', 
-                              help="Se usará para dar acceso al archivo.")
-    
+       
     # Carga de archivos
     col1, col2 = st.columns(2)
     
@@ -300,9 +225,9 @@ def main():
         archivo_libro = st.file_uploader("Cargar archivo Libro Auxiliar", type=['xlsx'])
     
     # Verificar que todos los campos necesarios estén completos
-    if archivo_token and archivo_libro and nombre_empresa and user_email:
-        if st.button('Procesar archivos'):
-            with st.spinner('Procesando archivos...'):
+    if archivo_token and archivo_libro and nombre_empresa: # Eliminé la dependencia de user_email
+        if st.button('Procesar y generar archivo de descarga'):
+            with st.spinner('Procesando archivos y generando Excel...'):
                 try:
                     # Leer archivos
                     df_token = pd.read_excel(archivo_token)
@@ -316,17 +241,9 @@ def main():
                         resultados = buscar_coincidencias(df_token_proc, df_libro_proc)
 
                         if resultados is not None:
-                            st.success("¡Procesamiento completado!")
-
-                            # Crear Google Sheet y compartir con el usuario
-                            link_sheet = crear_google_sheet(resultados, nombre_empresa, user_email)
-
-                            if link_sheet:
-                                st.success("¡Archivo creado exitosamente!")
-                                st.write("Link al archivo de resultados:")
-                                st.markdown(f"[Abrir Google Sheet]({link_sheet})")
-                            else:
-                                st.error("No se pudo crear el archivo en Google Sheets.")
+                            st.session_state['resultados_df'] = resultados
+                            st.session_state['nombre_empresa'] = nombre_empresa
+                            st.success("¡Procesamiento completado! Desplázate hacia abajo para descargar el archivo.")
                         else:
                             st.error("Error al buscar coincidencias en los datos.")
                     else:
@@ -334,8 +251,38 @@ def main():
 
                 except Exception as e:
                     st.error(f"Error en el procesamiento: {str(e)}")
+
+    if 'resultados_df' in st.session_state:
+        df_resultados = st.session_state['resultados_df']
+        nombre_empresa_file = st.session_state['nombre_empresa']
+        
+        # Generar Excel y nombre del archivo
+        excel_data, nombre_archivo_excel = to_excel(df_resultados, nombre_empresa_file)
+        
+        st.subheader("✅ Descargar Resultados")
+        st.write(f"El archivo **{nombre_archivo_excel}** está listo para descargar.")
+        
+        # Botón de descarga
+        st.download_button(
+            label="Descargar Excel de Resultados",
+            data=excel_data,
+            file_name=nombre_archivo_excel,
+            mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            key='download_excel'
+        )
+        
+        st.info("Nota: La descarga es local. El proceso de Google Sheets y la entrada de correo electrónico han sido deshabilitados.")
+    
     else:
-        st.info("Por favor, complete todos los campos y cargue los archivos necesarios.")
+        if not (archivo_token and archivo_libro and nombre_empresa):
+            st.info("Por favor, complete todos los campos y cargue los archivos necesarios para iniciar el procesamiento.")
+
 
 if __name__ == "__main__":
+    # Inicializar session_state si es necesario (para asegurar que el botón de descarga se muestre correctamente después del procesamiento)
+    if 'resultados_df' not in st.session_state:
+        st.session_state['resultados_df'] = None
+    if 'nombre_empresa' not in st.session_state:
+        st.session_state['nombre_empresa'] = ''
+
     main()
