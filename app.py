@@ -150,14 +150,12 @@ def to_excel(df, nombre_empresa):
     """
     Convierte el DataFrame de resultados a un archivo Excel en un buffer (BytesIO).
     """
-    # *** VERIFICACIÓN DE SEGURIDAD AGREGADA ***
+    
+    # *** SOLO RETORNAR NONE SI NO ES DATAFRAME. EL MENSAJE DE ERROR SE MUEVE A main() ***
     if not isinstance(df, pd.DataFrame):
-        st.error("Error: Los datos de resultados no son un DataFrame válido. No se puede crear el archivo Excel.")
-        return None, None # Retorna None para que la función main pueda manejar la falla
+        return None, None 
     
     # AJUSTE CLAVE: Convertir explícitamente el DataFrame a string
-    # Esto asegura que no haya objetos NaN/NA que rompan xlsxwriter, manteniendo 
-    # celdas vacías donde previamente habías puesto ''.
     df_safe = df.astype(str)
     
     output = BytesIO()
@@ -204,8 +202,7 @@ def to_excel(df, nombre_empresa):
     nombre_archivo = f"{nombre_empresa}_Comparacion_{fecha_actual}_{numero_aleatorio}.xlsx"
     
     return processed_data, nombre_archivo
-    
-# --- Función MAIN modificada ---
+
 
 def main():
     st.title('🔄 Comparador Token DIAN y Libro Auxiliar')
@@ -264,35 +261,39 @@ def main():
                 except Exception as e:
                     st.error(f"Error en el procesamiento: {str(e)}")
 
-    if 'resultados_df' in st.session_state:
-     df_resultados = st.session_state['resultados_df']
-     nombre_empresa_file = st.session_state['nombre_empresa']
-    
-    # Generar Excel y nombre del archivo
-    excel_data, nombre_archivo_excel = to_excel(df_resultados, nombre_empresa_file)
-    
-    # *** VERIFICACIÓN ADICIONAL PARA LA DESCARGA ***
-    if excel_data is not None and nombre_archivo_excel is not None:
-        st.subheader("✅ Descargar Resultados")
-        st.write(f"El archivo **{nombre_archivo_excel}** está listo para descargar.")
+    if 'resultados_df' in st.session_state and st.session_state['resultados_df'] is not None:
+        df_resultados = st.session_state['resultados_df']
+        nombre_empresa_file = st.session_state['nombre_empresa']
         
-        # Botón de descarga
-        st.download_button(
-            label="Descargar Excel de Resultados",
-            data=excel_data,
-            file_name=nombre_archivo_excel,
-            mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-            key='download_excel'
-        )
+        # Generar Excel y nombre del archivo
+        excel_data, nombre_archivo_excel = to_excel(df_resultados, nombre_empresa_file)
         
-        st.info("Nota: La descarga es local. El proceso de Google Sheets y la entrada de correo electrónico han sido deshabilitados.")
+        # *** LOGICA DE MENSAJE DE ERROR Y DESCARGA AQUI ***
+        if excel_data is not None and nombre_archivo_excel is not None:
+            st.subheader("✅ Descargar Resultados")
+            st.write(f"El archivo **{nombre_archivo_excel}** está listo para descargar.")
+            
+            # Botón de descarga
+            st.download_button(
+                label="Descargar Excel de Resultados",
+                data=excel_data,
+                file_name=nombre_archivo_excel,
+                mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                key='download_excel'
+            )
+            
+            st.info("Nota: La descarga es local. El proceso de Google Sheets y la entrada de correo electrónico han sido deshabilitados.")
+        else:
+            # ESTE ES EL NUEVO LUGAR PARA MOSTRAR EL MENSAJE DE ERROR:
+            # Solo se muestra si to_excel fue llamada (df_resultados no es None) pero falló
+            st.error("Error: Los datos de resultados no son un DataFrame válido. No se puede crear el archivo Excel. Verifique que el procesamiento anterior haya sido exitoso.")
+            
     else:
         if not (archivo_token and archivo_libro and nombre_empresa):
             st.info("Por favor, complete todos los campos y cargue los archivos necesarios para iniciar el procesamiento.")
 
-
 if __name__ == "__main__":
-    # Inicializar session_state si es necesario (para asegurar que el botón de descarga se muestre correctamente después del procesamiento)
+    # Inicializar session_state
     if 'resultados_df' not in st.session_state:
         st.session_state['resultados_df'] = None
     if 'nombre_empresa' not in st.session_state:
