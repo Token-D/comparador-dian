@@ -149,25 +149,38 @@ def buscar_coincidencias(df_token, df_libro):
 def to_excel(df, nombre_empresa):
     """
     Convierte el DataFrame de resultados a un archivo Excel en un buffer (BytesIO).
+    Aplica formato numérico a las columnas 'Total' y 'Diferencia_Total'.
     """
     
-    # *** SOLO RETORNAR NONE SI NO ES DATAFRAME. EL MENSAJE DE ERROR SE MUEVE A main() ***
     if not isinstance(df, pd.DataFrame):
         return None, None 
     
-    # AJUSTE CLAVE: Convertir explícitamente el DataFrame a string
-    df_safe = df.astype(str)
+    # 1. Crear una copia segura para la conversión a string
+    # Identificar columnas numéricas que deben ser EXCLUIDAS de la conversión a string
+    numeric_cols = ['Total', 'Debito_Libro', 'Diferencia_Total'] 
     
+    # Hacer una copia del DF para la escritura
+    df_safe = df.copy()
+    
+    # Convertir todas las columnas A STRING EXCEPTO las columnas numéricas
+    for col in df.columns:
+        if col not in numeric_cols:
+            df_safe[col] = df_safe[col].astype(str)
+        # Para las columnas numéricas, aseguramos que los valores vacíos sean NaN (luego se tratan en el formato)
+        # Esto es seguro ya que se hicieron los redondeos y rellenos antes de este paso.
+
     output = BytesIO()
-    # Usar el motor 'xlsxwriter' para aplicar el formato
+    
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
         
         # Usar el DataFrame limpio (df_safe) para la escritura en Excel
         df_safe.to_excel(writer, index=False, sheet_name='Resultados')
         
-        # Aplicar formato (similar al de Google Sheets: fila de encabezado congelada y columnas resaltadas)
         workbook = writer.book
         worksheet = writer.sheets['Resultados']
+        
+        # 2. Definir formato numérico (e.g., separador de miles y dos decimales)
+        number_format = workbook.add_format({'num_format': '#,##0.00'})
         
         # Formato de color para las columnas de coincidencia 
         header_format = workbook.add_format({
@@ -189,9 +202,24 @@ def to_excel(df, nombre_empresa):
             else:
                 worksheet.write(0, col_num, value, default_header_format)
         
-        # Ajuste de ancho de columnas simple
+        # 3. Aplicar formato numérico a las columnas después de los encabezados
+        
+        # Columna 'Total' (Índice H es 7)
+        col_total_idx = df.columns.get_loc('Total')
+        # Columna 'Diferencia_Total' (Índice L es 11)
+        col_diferencia_idx = df.columns.get_loc('Diferencia_Total')
+        
+        # Aplicar el formato numérico desde la segunda fila hasta el final (1 es la segunda fila)
+        # El rango es de fila 1 (segunda fila) a la última fila, columna 7 (Total)
+        worksheet.set_column(col_total_idx, col_total_idx, None, number_format)
+        
+        # Aplicar el formato numérico al 'Diferencia_Total' (columna 11)
+        worksheet.set_column(col_diferencia_idx, col_diferencia_idx, None, number_format)
+
+        # Ajuste de ancho de columnas (ahora solo se ajusta el ancho, no el formato de celda)
         for i, col in enumerate(df.columns):
-            max_len = max(df_safe[col].apply(len).max(), len(col)) + 2
+            # Usar df.columns para el ancho
+            max_len = max(df[col].astype(str).apply(len).max(), len(col)) + 2
             worksheet.set_column(i, i, max_len)
             
     processed_data = output.getvalue()
@@ -202,7 +230,6 @@ def to_excel(df, nombre_empresa):
     nombre_archivo = f"{nombre_empresa}_Comparacion_{fecha_actual}_{numero_aleatorio}.xlsx"
     
     return processed_data, nombre_archivo
-
 
 def main():
     st.title('🔄 Comparador Token DIAN y Libro Auxiliar')
@@ -300,6 +327,7 @@ if __name__ == "__main__":
         st.session_state['nombre_empresa'] = ''
 
     main()
+
 
 
 
