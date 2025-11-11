@@ -150,10 +150,18 @@ def to_excel(df, nombre_empresa):
     """
     Convierte el DataFrame de resultados a un archivo Excel en un buffer (BytesIO).
     """
+    
+    # *** AJUSTE CLAVE AQUÍ: Convertir explícitamente el DataFrame a string ***
+    # Esto asegura que no haya objetos NaN/NA que rompan xlsxwriter, manteniendo 
+    # celdas vacías donde previamente habías puesto ''.
+    df_safe = df.astype(str)
+    
     output = BytesIO()
     # Usar el motor 'xlsxwriter' para aplicar el formato que se hacía en Google Sheets
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-        df.to_excel(writer, index=False, sheet_name='Resultados')
+        
+        # Usar el DataFrame limpio (df_safe) para la escritura en Excel
+        df_safe.to_excel(writer, index=False, sheet_name='Resultados')
         
         # Aplicar formato (similar al de Google Sheets: fila de encabezado congelada y columnas resaltadas)
         workbook = writer.book
@@ -173,7 +181,7 @@ def to_excel(df, nombre_empresa):
         worksheet.freeze_panes(1, 0)
         
         # Escribir encabezados con formato
-        for col_num, value in enumerate(df.columns.values):
+        for col_num, value in enumerate(df.columns.values): # Usar df.columns para obtener el orden original
             if 8 <= col_num <= 11: # Columnas 9, 10, 11, 12 (índices 8, 9, 10, 11)
                 worksheet.write(0, col_num, value, header_format)
             else:
@@ -181,7 +189,8 @@ def to_excel(df, nombre_empresa):
         
         # Ajuste de ancho de columnas simple
         for i, col in enumerate(df.columns):
-            max_len = max(df[col].astype(str).apply(len).max(), len(col)) + 2
+            # Usar df_safe para calcular la longitud máxima
+            max_len = max(df_safe[col].apply(len).max(), len(col)) + 2
             worksheet.set_column(i, i, max_len)
             
     processed_data = output.getvalue()
@@ -192,7 +201,7 @@ def to_excel(df, nombre_empresa):
     nombre_archivo = f"{nombre_empresa}_Comparacion_{fecha_actual}_{numero_aleatorio}.xlsx"
     
     return processed_data, nombre_archivo
-
+    
 # --- Función MAIN modificada ---
 
 def main():
@@ -286,3 +295,4 @@ if __name__ == "__main__":
         st.session_state['nombre_empresa'] = ''
 
     main()
+
