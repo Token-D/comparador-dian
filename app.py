@@ -227,7 +227,7 @@ def to_excel(df, nombre_empresa):
     # Crear nombre del archivo
     fecha_actual = datetime.now().strftime('%Y%m%d')
     numero_aleatorio = random.randint(1000, 9999)
-    nombre_archivo = f"{nombre_empresa}_Comparacion_{fecha_actual}_{numero_aleatorio}.xlsx"
+    nombre_archivo = f"{nombre_empresa}_Token_{fecha_actual}_{numero_aleatorio}.xlsx"
     
     return processed_data, nombre_archivo
 
@@ -262,7 +262,7 @@ def main():
     
     # Verificar que todos los campos necesarios estén completos
     if archivo_token and archivo_libro and nombre_empresa: # Eliminé la dependencia de user_email
-        if st.button('Procesar y generar archivo de descarga'):
+        if st.button('Procesar y Analizar Datos'):
             with st.spinner('Procesando archivos y generando Excel...'):
                 try:
                     # Leer archivos
@@ -302,18 +302,17 @@ def main():
             
             # Botón de descarga
             st.download_button(
-                label="Descargar Excel de Resultados",
+                label="Descargar Excel",
                 data=excel_data,
                 file_name=nombre_archivo_excel,
                 mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
                 key='download_excel'
             )
             
-            st.info("Nota: La descarga es local. El proceso de Google Sheets y la entrada de correo electrónico han sido deshabilitados.")
         else:
             # ESTE ES EL NUEVO LUGAR PARA MOSTRAR EL MENSAJE DE ERROR:
             # Solo se muestra si to_excel fue llamada (df_resultados no es None) pero falló
-            st.error("Error: Los datos de resultados no son un DataFrame válido. No se puede crear el archivo Excel. Verifique que el procesamiento anterior haya sido exitoso.")
+            st.error("Error: No se puede crear el archivo Excel.")
             
     else:
         if not (archivo_token and archivo_libro and nombre_empresa):
@@ -327,6 +326,7 @@ if __name__ == "__main__":
         st.session_state['nombre_empresa'] = ''
 
     main()
+
 
 
 
