@@ -1,8 +1,4 @@
 streamlit
 pandas
 openpyxl
-numpy
-google-auth
-google-auth-oauthlib
-google-auth-httplib2
-google-api-python-client
+xlsxwriter
