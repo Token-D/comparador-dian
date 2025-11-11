@@ -265,8 +265,8 @@ def main():
                     st.error(f"Error en el procesamiento: {str(e)}")
 
     if 'resultados_df' in st.session_state:
-    df_resultados = st.session_state['resultados_df']
-    nombre_empresa_file = st.session_state['nombre_empresa']
+     df_resultados = st.session_state['resultados_df']
+     nombre_empresa_file = st.session_state['nombre_empresa']
     
     # Generar Excel y nombre del archivo
     excel_data, nombre_archivo_excel = to_excel(df_resultados, nombre_empresa_file)
@@ -299,5 +299,6 @@ if __name__ == "__main__":
         st.session_state['nombre_empresa'] = ''
 
     main()
+
 
 
