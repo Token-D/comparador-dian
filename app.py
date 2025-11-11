@@ -150,14 +150,18 @@ def to_excel(df, nombre_empresa):
     """
     Convierte el DataFrame de resultados a un archivo Excel en un buffer (BytesIO).
     """
+    # *** VERIFICACIÓN DE SEGURIDAD AGREGADA ***
+    if not isinstance(df, pd.DataFrame):
+        st.error("Error: Los datos de resultados no son un DataFrame válido. No se puede crear el archivo Excel.")
+        return None, None # Retorna None para que la función main pueda manejar la falla
     
-    # *** AJUSTE CLAVE AQUÍ: Convertir explícitamente el DataFrame a string ***
+    # AJUSTE CLAVE: Convertir explícitamente el DataFrame a string
     # Esto asegura que no haya objetos NaN/NA que rompan xlsxwriter, manteniendo 
     # celdas vacías donde previamente habías puesto ''.
     df_safe = df.astype(str)
     
     output = BytesIO()
-    # Usar el motor 'xlsxwriter' para aplicar el formato que se hacía en Google Sheets
+    # Usar el motor 'xlsxwriter' para aplicar el formato
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
         
         # Usar el DataFrame limpio (df_safe) para la escritura en Excel
@@ -167,9 +171,9 @@ def to_excel(df, nombre_empresa):
         workbook = writer.book
         worksheet = writer.sheets['Resultados']
         
-        # Formato de color para las columnas de coincidencia (índices 8 a 11: Doc_Num_Encontrado a Diferencia_Total)
+        # Formato de color para las columnas de coincidencia 
         header_format = workbook.add_format({
-            'bg_color': '#D9F2D9', # Verde claro (similar al 0.85, 0.92, 0.85)
+            'bg_color': '#D9F2D9', 
             'bold': True,
             'border': 1
         })
@@ -181,15 +185,14 @@ def to_excel(df, nombre_empresa):
         worksheet.freeze_panes(1, 0)
         
         # Escribir encabezados con formato
-        for col_num, value in enumerate(df.columns.values): # Usar df.columns para obtener el orden original
-            if 8 <= col_num <= 11: # Columnas 9, 10, 11, 12 (índices 8, 9, 10, 11)
+        for col_num, value in enumerate(df.columns.values):
+            if 8 <= col_num <= 11: 
                 worksheet.write(0, col_num, value, header_format)
             else:
                 worksheet.write(0, col_num, value, default_header_format)
         
         # Ajuste de ancho de columnas simple
         for i, col in enumerate(df.columns):
-            # Usar df_safe para calcular la longitud máxima
             max_len = max(df_safe[col].apply(len).max(), len(col)) + 2
             worksheet.set_column(i, i, max_len)
             
@@ -262,12 +265,14 @@ def main():
                     st.error(f"Error en el procesamiento: {str(e)}")
 
     if 'resultados_df' in st.session_state:
-        df_resultados = st.session_state['resultados_df']
-        nombre_empresa_file = st.session_state['nombre_empresa']
-        
-        # Generar Excel y nombre del archivo
-        excel_data, nombre_archivo_excel = to_excel(df_resultados, nombre_empresa_file)
-        
+    df_resultados = st.session_state['resultados_df']
+    nombre_empresa_file = st.session_state['nombre_empresa']
+    
+    # Generar Excel y nombre del archivo
+    excel_data, nombre_archivo_excel = to_excel(df_resultados, nombre_empresa_file)
+    
+    # *** VERIFICACIÓN ADICIONAL PARA LA DESCARGA ***
+    if excel_data is not None and nombre_archivo_excel is not None:
         st.subheader("✅ Descargar Resultados")
         st.write(f"El archivo **{nombre_archivo_excel}** está listo para descargar.")
         
@@ -281,7 +286,6 @@ def main():
         )
         
         st.info("Nota: La descarga es local. El proceso de Google Sheets y la entrada de correo electrónico han sido deshabilitados.")
-    
     else:
         if not (archivo_token and archivo_libro and nombre_empresa):
             st.info("Por favor, complete todos los campos y cargue los archivos necesarios para iniciar el procesamiento.")
@@ -295,4 +299,5 @@ if __name__ == "__main__":
         st.session_state['nombre_empresa'] = ''
 
     main()
+
 
