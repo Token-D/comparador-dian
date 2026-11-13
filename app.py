@@ -74,13 +74,17 @@ DIAS_MAX = 30       # días máximos entre factura y egreso para el cruce "Por v
 
 def buscar_coincidencias(df_token, df_libro, tolerancia=TOLERANCIA, dias_max=DIAS_MAX):
     """
-    Clasifica cada factura del Token DIAN contra el Libro Auxiliar:
-      Exacto           -> NIT + folio (número completo) y diferencia <= tolerancia
-      Probable         -> NIT + folio, pero la diferencia supera la tolerancia (revisar)
-      Por valor        -> sin folio en la nota, pero un único egreso del mismo NIT con
-                          valor dentro de la tolerancia y fecha cercana
-      Sin coincidencia -> no se encontró nada (validar manualmente)
-    Entre varios candidatos se elige el de débito más cercano al total.
+    Cruce UNO A UNO entre facturas del Token DIAN y egresos del Libro Auxiliar.
+    Un egreso (Doc Num + Nota) solo se asigna a una factura.
+
+    Fase 1 - por folio (tiene prioridad): NIT + folio como número completo.
+        Las parejas se asignan de la menor a la mayor diferencia de valor.
+        Exacto   -> diferencia <= tolerancia
+        Probable -> diferencia > tolerancia (revisar)
+    Fase 2 - por valor, solo con facturas y egresos que quedaron libres:
+        mismo NIT, valor dentro de la tolerancia y fecha dentro de dias_max.
+        Las parejas se asignan de la menor a la mayor distancia en días.
+    Lo que no cruza queda como "Sin coincidencia".
     """
     try:
         resultados = df_token.copy()
@@ -99,40 +103,60 @@ def buscar_coincidencias(df_token, df_libro, tolerancia=TOLERANCIA, dias_max=DIA
         libro = libro[libro['Debitos'] > 0]
         libro_por_nit = {nit: g for nit, g in libro.groupby('Nit')}
 
-        for idx in resultados.index:
-            nit = str(resultados.at[idx, 'NIT Emisor'])
-            folio = str(resultados.at[idx, 'Folio'])
-            total = float(resultados.at[idx, 'Total'])
-            fecha = fechas_token.at[idx]
+        facturas_usadas = set()   # índices del token ya cruzados
+        egresos_usados = set()    # índices del libro ya cruzados
 
-            cand_nit = libro_por_nit.get(nit)
-            if cand_nit is None or pd.isna(total):
+        def asignar(idx_t, idx_l, clasif):
+            fila = libro.loc[idx_l]
+            total = float(resultados.at[idx_t, 'Total'])
+            resultados.at[idx_t, 'Doc_Num_Encontrado'] = fila['Doc Num']
+            resultados.at[idx_t, 'Nota_Libro'] = fila['Nota']
+            resultados.at[idx_t, 'Debito_Libro'] = fila['Debitos']
+            resultados.at[idx_t, 'Diferencia_Total'] = total - fila['Debitos']
+            resultados.at[idx_t, 'Clasificacion'] = clasif
+            facturas_usadas.add(idx_t)
+            egresos_usados.add(idx_l)
+
+        # ---------- Fase 1: por folio ----------
+        parejas = []
+        for idx_t in resultados.index:
+            total = resultados.at[idx_t, 'Total']
+            cand = libro_por_nit.get(str(resultados.at[idx_t, 'NIT Emisor']))
+            if cand is None or pd.isna(total):
                 continue
-
-            elegido, clasif = None, None
-
-            # 1) Folio como número completo (no como parte de otro número)
+            folio = str(resultados.at[idx_t, 'Folio'])
             patron = r'(?<!\d)' + re.escape(folio) + r'(?!\d)'
-            por_folio = cand_nit[cand_nit['Nota'].str.contains(patron, na=False, regex=True)]
-            if not por_folio.empty:
-                pos = (por_folio['Debitos'] - total).abs().to_numpy().argmin()
-                elegido = por_folio.iloc[pos]
-                clasif = 'Exacto' if abs(total - elegido['Debitos']) <= tolerancia else 'Probable'
+            por_folio = cand[cand['Nota'].str.contains(patron, na=False, regex=True)]
+            for idx_l, deb in por_folio['Debitos'].items():
+                parejas.append((abs(float(total) - deb), idx_t, idx_l))
 
-            # 2) Sin folio: un único egreso con el mismo valor y fecha cercana
-            else:
-                por_valor = cand_nit[(cand_nit['Debitos'] - total).abs() <= tolerancia]
-                if pd.notna(fecha):
-                    por_valor = por_valor[(por_valor['Fecha'] - fecha).abs() <= pd.Timedelta(days=dias_max)]
-                if len(por_valor) == 1:
-                    elegido, clasif = por_valor.iloc[0], 'Por valor'
+        for dif, idx_t, idx_l in sorted(parejas, key=lambda p: p[0]):
+            if idx_t in facturas_usadas or idx_l in egresos_usados:
+                continue
+            asignar(idx_t, idx_l, 'Exacto' if dif <= tolerancia else 'Probable')
 
-            if elegido is not None:
-                resultados.at[idx, 'Doc_Num_Encontrado'] = elegido['Doc Num']
-                resultados.at[idx, 'Nota_Libro'] = elegido['Nota']
-                resultados.at[idx, 'Debito_Libro'] = elegido['Debitos']
-                resultados.at[idx, 'Diferencia_Total'] = total - elegido['Debitos']
-                resultados.at[idx, 'Clasificacion'] = clasif
+        # ---------- Fase 2: por valor y fecha ----------
+        parejas = []
+        for idx_t in resultados.index:
+            if idx_t in facturas_usadas:
+                continue
+            total = resultados.at[idx_t, 'Total']
+            fecha = fechas_token.at[idx_t]
+            cand = libro_por_nit.get(str(resultados.at[idx_t, 'NIT Emisor']))
+            if cand is None or pd.isna(total) or pd.isna(fecha):
+                continue
+            cand = cand[~cand.index.isin(egresos_usados)]
+            cand = cand[(cand['Debitos'] - float(total)).abs() <= tolerancia]
+            for idx_l, f_l in cand['Fecha'].items():
+                if pd.notna(f_l):
+                    dias = abs((f_l - fecha).days)
+                    if dias <= dias_max:
+                        parejas.append((dias, idx_t, idx_l))
+
+        for dias, idx_t, idx_l in sorted(parejas, key=lambda p: p[0]):
+            if idx_t in facturas_usadas or idx_l in egresos_usados:
+                continue
+            asignar(idx_t, idx_l, 'Por valor')
 
         resultados['Total'] = resultados['Total'].round(1)
         resultados['Debito_Libro'] = resultados['Debito_Libro'].round(1)
