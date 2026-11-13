@@ -57,7 +57,8 @@ def procesar_libro_auxiliar(df):
             'Debitos': 'sum',
             'Creditos': 'sum',
             'Tercero': 'first',
-            'Nit': 'first'
+            'Nit': 'first',
+            'Fecha': 'first'
         }).reset_index()
 
         df_agrupado = df_agrupado[df_agrupado['Doc Num'].notna() & (df_agrupado['Doc Num'] != '')]
@@ -68,63 +69,89 @@ def procesar_libro_auxiliar(df):
         st.error(f"Error en procesamiento del Libro Auxiliar: {str(e)}")
         return None
 
-def buscar_coincidencias(df_token, df_libro):
+TOLERANCIA = 1000   # diferencia máxima (en pesos) para considerar "Exacto"
+DIAS_MAX = 30       # días máximos entre factura y egreso para el cruce "Por valor"
+
+def buscar_coincidencias(df_token, df_libro, tolerancia=TOLERANCIA, dias_max=DIAS_MAX):
+    """
+    Clasifica cada factura del Token DIAN contra el Libro Auxiliar:
+      Exacto           -> NIT + folio (número completo) y diferencia <= tolerancia
+      Probable         -> NIT + folio, pero la diferencia supera la tolerancia (revisar)
+      Por valor        -> sin folio en la nota, pero un único egreso del mismo NIT con
+                          valor dentro de la tolerancia y fecha cercana
+      Sin coincidencia -> no se encontró nada (validar manualmente)
+    Entre varios candidatos se elige el de débito más cercano al total.
+    """
     try:
         resultados = df_token.copy()
         resultados['Doc_Num_Encontrado'] = 'Validar Manualmente'
         resultados['Nota_Libro'] = ''
-        # Columnas numéricas: se mantienen float64 con NaN (NO se rellenan con '')
         resultados['Debito_Libro'] = np.nan
         resultados['Diferencia_Total'] = np.nan
+        resultados['Clasificacion'] = 'Sin coincidencia'
 
-        resultados['Fecha Emisión'] = pd.to_datetime(resultados['Fecha Emisión']).dt.strftime('%d/%m/%Y')
+        fechas_token = pd.to_datetime(resultados['Fecha Emisión'], errors='coerce')
+        resultados['Fecha Emisión'] = fechas_token.dt.strftime('%d/%m/%Y')
 
-        for idx, row in resultados.iterrows():
-            nit = str(row['NIT Emisor'])
-            folio = str(row['Folio'])
+        # Solo egresos con débito (las líneas de crédito no son el gasto)
+        libro = df_libro.copy()
+        libro['Fecha'] = pd.to_datetime(libro['Fecha'], errors='coerce')
+        libro = libro[libro['Debitos'] > 0]
+        libro_por_nit = {nit: g for nit, g in libro.groupby('Nit')}
 
-            # regex=False: el folio se busca como texto literal
-            coincidencias = df_libro[
-                (df_libro['Nit'] == nit) &
-                (df_libro['Debitos'] == float(row['Total'])) &
-                df_libro['Nota'].str.contains(folio, na=False, regex=False)
-            ]
+        for idx in resultados.index:
+            nit = str(resultados.at[idx, 'NIT Emisor'])
+            folio = str(resultados.at[idx, 'Folio'])
+            total = float(resultados.at[idx, 'Total'])
+            fecha = fechas_token.at[idx]
 
-            if coincidencias.empty:
-                # Búsqueda secundaria
-                coincidencias = df_libro[
-                    (df_libro['Nit'] == nit) &
-                    df_libro['Nota'].str.contains(folio, na=False, regex=False)
-                ]
+            cand_nit = libro_por_nit.get(nit)
+            if cand_nit is None or pd.isna(total):
+                continue
 
-            if not coincidencias.empty:
-                c = coincidencias.iloc[0]
-                resultados.at[idx, 'Doc_Num_Encontrado'] = c['Doc Num']
-                resultados.at[idx, 'Nota_Libro'] = c['Nota']
-                resultados.at[idx, 'Debito_Libro'] = c['Debitos']
-                resultados.at[idx, 'Diferencia_Total'] = float(row['Total']) - c['Debitos']
+            elegido, clasif = None, None
+
+            # 1) Folio como número completo (no como parte de otro número)
+            patron = r'(?<!\d)' + re.escape(folio) + r'(?!\d)'
+            por_folio = cand_nit[cand_nit['Nota'].str.contains(patron, na=False, regex=True)]
+            if not por_folio.empty:
+                pos = (por_folio['Debitos'] - total).abs().to_numpy().argmin()
+                elegido = por_folio.iloc[pos]
+                clasif = 'Exacto' if abs(total - elegido['Debitos']) <= tolerancia else 'Probable'
+
+            # 2) Sin folio: un único egreso con el mismo valor y fecha cercana
+            else:
+                por_valor = cand_nit[(cand_nit['Debitos'] - total).abs() <= tolerancia]
+                if pd.notna(fecha):
+                    por_valor = por_valor[(por_valor['Fecha'] - fecha).abs() <= pd.Timedelta(days=dias_max)]
+                if len(por_valor) == 1:
+                    elegido, clasif = por_valor.iloc[0], 'Por valor'
+
+            if elegido is not None:
+                resultados.at[idx, 'Doc_Num_Encontrado'] = elegido['Doc Num']
+                resultados.at[idx, 'Nota_Libro'] = elegido['Nota']
+                resultados.at[idx, 'Debito_Libro'] = elegido['Debitos']
+                resultados.at[idx, 'Diferencia_Total'] = total - elegido['Debitos']
+                resultados.at[idx, 'Clasificacion'] = clasif
 
         resultados['Total'] = resultados['Total'].round(1)
         resultados['Debito_Libro'] = resultados['Debito_Libro'].round(1)
         resultados['Diferencia_Total'] = resultados['Diferencia_Total'].round(1)
 
-        # Ordenar (con las columnas numéricas todavía numéricas)
-        resultados = resultados.sort_values(
-            by=['Diferencia_Total', 'Doc_Num_Encontrado'],
-            ascending=[False, False],
-            na_position='last'
-        )
+        # Primero lo que hay que revisar, luego lo resuelto; dentro de cada grupo, mayor diferencia primero
+        orden = {'Probable': 0, 'Sin coincidencia': 1, 'Por valor': 2, 'Exacto': 3}
+        resultados['_o'] = resultados['Clasificacion'].map(orden)
+        resultados['_d'] = resultados['Diferencia_Total'].abs()
+        resultados = resultados.sort_values(by=['_o', '_d'], ascending=[True, False], na_position='last')
 
         columnas_ordenadas = [
             'Tipo de documento', 'Folio', 'Prefijo', 'Fecha Emisión', 'NIT Emisor',
             'Nombre Emisor', 'NIT Receptor', 'Total', 'Doc_Num_Encontrado',
-            'Nota_Libro', 'Debito_Libro', 'Diferencia_Total'
+            'Nota_Libro', 'Debito_Libro', 'Diferencia_Total', 'Clasificacion'
         ]
-        columnas_existentes = [col for col in columnas_ordenadas if col in resultados.columns]
-        resultados = resultados[columnas_existentes]
+        resultados = resultados[[c for c in columnas_ordenadas if c in resultados.columns]]
 
-        # Solo las columnas de TEXTO se rellenan con vacío.
-        # Las numéricas quedan con NaN y Excel las muestra como celdas vacías.
+        # Solo las columnas de texto se rellenan con vacío; las numéricas quedan con NaN
         cols_texto = [c for c in resultados.columns
                       if c not in ('Total', 'Debito_Libro', 'Diferencia_Total')]
         resultados[cols_texto] = resultados[cols_texto].fillna('')
@@ -164,7 +191,7 @@ def to_excel(df, nombre_empresa):
         worksheet.freeze_panes(1, 0)
 
         for col_num, value in enumerate(df.columns.values):
-            if 8 <= col_num <= 11:
+            if 8 <= col_num <= 12:
                 worksheet.write(0, col_num, value, header_format)
             else:
                 worksheet.write(0, col_num, value, default_header_format)
