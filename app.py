@@ -5,6 +5,7 @@ from datetime import datetime
 import random
 from io import BytesIO
 import re
+from xlsxwriter.utility import xl_col_to_name
 
 # Configuración de la página
 st.set_page_config(
@@ -38,20 +39,28 @@ def procesar_token_dian(df):
         st.error(f"Error en el procesamiento del Token DIAN: {str(e)}")
         return None
 
+def leer_lineas_libro(df):
+    """Líneas del Libro Auxiliar con encabezado correcto, números, NIT y fecha ya convertidos."""
+    nombres_columnas = df.iloc[2]
+    df_p = df.iloc[3:].copy()
+    df_p.columns = nombres_columnas
+    df_p = df_p.reset_index(drop=True)
+
+    df_p['Debitos'] = pd.to_numeric(df_p['Debitos'], errors='coerce')
+    df_p['Creditos'] = pd.to_numeric(df_p['Creditos'], errors='coerce')
+    df_p['Nit'] = df_p['Tercero'].str.extract(r'Nit:\s*(\d+)')
+    df_p['Fecha'] = pd.to_datetime(df_p['Fecha'], errors='coerce')
+    return df_p
+
+def _solo_movimientos(df_lineas):
+    """Líneas con Doc Num (descarta saldos iniciales y filas de totales)."""
+    return df_lineas[df_lineas['Doc Num'].notna() & (df_lineas['Doc Num'] != '')]
+
 def procesar_libro_auxiliar(df):
     try:
         st.write("Procesando Libro Auxiliar...")
 
-        nombres_columnas = df.iloc[2]
-
-        df_procesado = df.iloc[3:].copy()
-        df_procesado.columns = nombres_columnas
-        df_procesado = df_procesado.reset_index(drop=True)
-
-        df_procesado['Debitos'] = pd.to_numeric(df_procesado['Debitos'], errors='coerce')
-        df_procesado['Creditos'] = pd.to_numeric(df_procesado['Creditos'], errors='coerce')
-
-        df_procesado['Nit'] = df_procesado['Tercero'].str.extract(r'Nit:\s*(\d+)')
+        df_procesado = leer_lineas_libro(df)
 
         df_agrupado = df_procesado.groupby(['Doc Num', 'Nota'], dropna=False).agg({
             'Debitos': 'sum',
@@ -69,10 +78,37 @@ def procesar_libro_auxiliar(df):
         st.error(f"Error en procesamiento del Libro Auxiliar: {str(e)}")
         return None
 
+def agrupar_auxiliar(df_lineas):
+    """Hoja de apoyo: una línea por Tercero + Doc Num + Nota + Fecha, con débitos, créditos y diferencia."""
+    mov = _solo_movimientos(df_lineas)
+    agr = mov.groupby(['Tercero', 'Doc Num', 'Nota', 'Fecha'], dropna=False).agg(
+        **{'Suma de Debitos': ('Debitos', 'sum'), 'Suma de Creditos': ('Creditos', 'sum')}
+    ).reset_index()
+    agr['Diferencia (Deb - Cred)'] = (agr['Suma de Debitos'] - agr['Suma de Creditos']).round(2)
+    return agr.sort_values(['Tercero', 'Fecha', 'Doc Num'], na_position='last').reset_index(drop=True)
+
+def calcular_descuadres_tercero(df_lineas):
+    """
+    Por cada egreso (Doc Num) y tercero (NIT): débitos - créditos.
+    'Egreso_Cuadra_en_Total' indica si el egreso completo cuadra aunque el tercero no
+    (típico de una confusión de terceros: el mismo valor con signo contrario en otro NIT).
+    """
+    mov = _solo_movimientos(df_lineas)
+    glob = mov.groupby('Doc Num').agg(D=('Debitos', 'sum'), C=('Creditos', 'sum'))
+    glob['cuadra'] = (glob['D'] - glob['C']).abs() <= 1
+
+    por_nit = mov.dropna(subset=['Nit']).groupby(['Doc Num', 'Nit']).agg(
+        Tercero=('Tercero', 'first'),
+        **{'Suma de Debitos': ('Debitos', 'sum'), 'Suma de Creditos': ('Creditos', 'sum')}
+    ).reset_index()
+    por_nit['Diferencia (Deb - Cred)'] = (por_nit['Suma de Debitos'] - por_nit['Suma de Creditos']).round(2)
+    por_nit['Egreso_Cuadra_en_Total'] = por_nit['Doc Num'].map(glob['cuadra']).map({True: 'Sí', False: 'No'})
+    return por_nit
+
 TOLERANCIA = 1000   # diferencia máxima (en pesos) para considerar "Exacto"
 DIAS_MAX = 30       # días máximos entre factura y egreso para el cruce "Por valor"
 
-def buscar_coincidencias(df_token, df_libro, tolerancia=TOLERANCIA, dias_max=DIAS_MAX):
+def buscar_coincidencias(df_token, df_libro, df_lineas=None, tolerancia=TOLERANCIA, dias_max=DIAS_MAX):
     """
     Cruce UNO A UNO entre facturas del Token DIAN y egresos del Libro Auxiliar.
     Un egreso (Doc Num + Nota) solo se asigna a una factura.
@@ -93,6 +129,8 @@ def buscar_coincidencias(df_token, df_libro, tolerancia=TOLERANCIA, dias_max=DIA
         resultados['Debito_Libro'] = np.nan
         resultados['Diferencia_Total'] = np.nan
         resultados['Clasificacion'] = 'Sin coincidencia'
+        resultados['Dif_Deb_Cred_NIT'] = np.nan
+        resultados['Alerta_Descuadre'] = ''
 
         fechas_token = pd.to_datetime(resultados['Fecha Emisión'], errors='coerce')
         resultados['Fecha Emisión'] = fechas_token.dt.strftime('%d/%m/%Y')
@@ -166,6 +204,19 @@ def buscar_coincidencias(df_token, df_libro, tolerancia=TOLERANCIA, dias_max=DIA
                 continue
             asignar(idx_t, idx_l, 'Por valor')
 
+        # ---------- Alerta informativa: ¿el egreso cuadra para ESE tercero? ----------
+        # No cambia la clasificación; solo señala lo que conviene validar a mano.
+        if df_lineas is not None:
+            desc = calcular_descuadres_tercero(df_lineas)
+            mapa = {(d, n): v for d, n, v in zip(desc['Doc Num'], desc['Nit'], desc['Diferencia (Deb - Cred)'])}
+            for idx in resultados.index[resultados['Clasificacion'] != 'Sin coincidencia']:
+                dif_nit = mapa.get((resultados.at[idx, 'Doc_Num_Encontrado'],
+                                    str(resultados.at[idx, 'NIT Emisor'])))
+                if dif_nit is not None:
+                    resultados.at[idx, 'Dif_Deb_Cred_NIT'] = dif_nit
+                    if abs(dif_nit) > tolerancia:
+                        resultados.at[idx, 'Alerta_Descuadre'] = 'Revisar descuadre del tercero'
+
         resultados['Total'] = resultados['Total'].round(1)
         resultados['Debito_Libro'] = resultados['Debito_Libro'].round(1)
         resultados['Diferencia_Total'] = resultados['Diferencia_Total'].round(1)
@@ -179,13 +230,14 @@ def buscar_coincidencias(df_token, df_libro, tolerancia=TOLERANCIA, dias_max=DIA
         columnas_ordenadas = [
             'Tipo de documento', 'Folio', 'Prefijo', 'Fecha Emisión', 'NIT Emisor',
             'Nombre Emisor', 'NIT Receptor', 'Total', 'Doc_Num_Encontrado',
-            'Nota_Libro', 'Debito_Libro', 'Diferencia_Total', 'Clasificacion'
+            'Nota_Libro', 'Debito_Libro', 'Diferencia_Total', 'Clasificacion',
+            'Dif_Deb_Cred_NIT', 'Alerta_Descuadre'
         ]
         resultados = resultados[[c for c in columnas_ordenadas if c in resultados.columns]]
 
         # Solo las columnas de texto se rellenan con vacío; las numéricas quedan con NaN
         cols_texto = [c for c in resultados.columns
-                      if c not in ('Total', 'Debito_Libro', 'Diferencia_Total')]
+                      if c not in ('Total', 'Debito_Libro', 'Diferencia_Total', 'Dif_Deb_Cred_NIT')]
         resultados[cols_texto] = resultados[cols_texto].fillna('')
 
         return resultados
@@ -194,14 +246,19 @@ def buscar_coincidencias(df_token, df_libro, tolerancia=TOLERANCIA, dias_max=DIA
         st.error(f"Error en búsqueda de coincidencias: {str(e)}")
         return None
 
-def to_excel(df, nombre_empresa):
+def to_excel(df, nombre_empresa, df_aux=None, df_desc=None):
     """
-    Convierte el DataFrame de resultados a un archivo Excel en un buffer (BytesIO).
+    Excel descargable:
+      - Resultados: cruce Token vs Libro (filas con descuadre del tercero resaltadas)
+      - Auxiliar_Agrupado: libro consolidado por Tercero + Doc Num + Nota + Fecha
+      - Descuadres_Tercero: egresos donde un tercero no cuadra (débitos vs créditos)
     """
     if not isinstance(df, pd.DataFrame):
         return None, None
 
-    numeric_cols = ['Total', 'Debito_Libro', 'Diferencia_Total']
+    numeric_cols = ['Total', 'Debito_Libro', 'Diferencia_Total', 'Dif_Deb_Cred_NIT']
+    verde = ['Doc_Num_Encontrado', 'Nota_Libro', 'Debito_Libro', 'Diferencia_Total',
+             'Clasificacion', 'Dif_Deb_Cred_NIT', 'Alerta_Descuadre']
 
     df_safe = df.copy()
     for col in df.columns:
@@ -210,31 +267,55 @@ def to_excel(df, nombre_empresa):
 
     output = BytesIO()
 
-    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-        df_safe.to_excel(writer, index=False, sheet_name='Resultados')
-
+    with pd.ExcelWriter(output, engine='xlsxwriter', datetime_format='dd/mm/yyyy') as writer:
         workbook = writer.book
-        worksheet = writer.sheets['Resultados']
-
         number_format = workbook.add_format({'num_format': '#,##0.00'})
         header_format = workbook.add_format({'bg_color': '#D9F2D9', 'bold': True, 'border': 1})
         default_header_format = workbook.add_format({'bold': True, 'border': 1})
+        alerta_format = workbook.add_format({'bg_color': '#FFE699'})
 
-        worksheet.freeze_panes(1, 0)
+        def ancho(serie, titulo):
+            return min(max(serie.fillna('').astype(str).map(len).max(), len(titulo)) + 2, 60)
 
-        for col_num, value in enumerate(df.columns.values):
-            if 8 <= col_num <= 12:
-                worksheet.write(0, col_num, value, header_format)
-            else:
-                worksheet.write(0, col_num, value, default_header_format)
-
-        # Ancho de columnas (+ formato numérico en las columnas de montos)
+        # ---- Hoja 1: Resultados ----
+        df_safe.to_excel(writer, index=False, sheet_name='Resultados')
+        ws = writer.sheets['Resultados']
+        ws.freeze_panes(1, 0)
+        ws.autofilter(0, 0, len(df), len(df.columns) - 1)
         for i, col in enumerate(df.columns):
-            max_len = max(df[col].fillna('').astype(str).map(len).max(), len(col)) + 2
-            if col in numeric_cols:
-                worksheet.set_column(i, i, max_len, number_format)
-            else:
-                worksheet.set_column(i, i, max_len)
+            ws.write(0, i, col, header_format if col in verde else default_header_format)
+            ws.set_column(i, i, ancho(df[col], col), number_format if col in numeric_cols else None)
+
+        if 'Alerta_Descuadre' in df.columns and len(df) > 0:
+            letra = xl_col_to_name(df.columns.get_loc('Alerta_Descuadre'))
+            ws.conditional_format(1, 0, len(df), len(df.columns) - 1, {
+                'type': 'formula',
+                'criteria': f'=${letra}2<>""',
+                'format': alerta_format
+            })
+
+        # ---- Hoja 2: Auxiliar agrupado ----
+        if df_aux is not None and len(df_aux) > 0:
+            df_aux.to_excel(writer, index=False, sheet_name='Auxiliar_Agrupado')
+            wa = writer.sheets['Auxiliar_Agrupado']
+            wa.freeze_panes(1, 0)
+            wa.autofilter(0, 0, len(df_aux), len(df_aux.columns) - 1)
+            for i, col in enumerate(df_aux.columns):
+                wa.write(0, i, col, default_header_format)
+                es_num = col in ('Suma de Debitos', 'Suma de Creditos', 'Diferencia (Deb - Cred)')
+                wa.set_column(i, i, 14 if col == 'Fecha' else ancho(df_aux[col], col),
+                              number_format if es_num else None)
+
+        # ---- Hoja 3: Descuadres por tercero ----
+        if df_desc is not None and len(df_desc) > 0:
+            df_desc.to_excel(writer, index=False, sheet_name='Descuadres_Tercero')
+            wd = writer.sheets['Descuadres_Tercero']
+            wd.freeze_panes(1, 0)
+            wd.autofilter(0, 0, len(df_desc), len(df_desc.columns) - 1)
+            for i, col in enumerate(df_desc.columns):
+                wd.write(0, i, col, default_header_format)
+                es_num = col in ('Suma de Debitos', 'Suma de Creditos', 'Diferencia (Deb - Cred)')
+                wd.set_column(i, i, ancho(df_desc[col], col), number_format if es_num else None)
 
     processed_data = output.getvalue()
 
@@ -243,6 +324,12 @@ def to_excel(df, nombre_empresa):
     nombre_archivo = f"{nombre_empresa}_Token_{fecha_actual}_{numero_aleatorio}.xlsx"
 
     return processed_data, nombre_archivo
+
+def _solo_descuadrados(df_desc, tolerancia=TOLERANCIA):
+    if df_desc is None:
+        return None
+    d = df_desc[df_desc['Diferencia (Deb - Cred)'].abs() > tolerancia]
+    return d.sort_values(['Doc Num', 'Nit']).reset_index(drop=True)
 
 def main():
     st.title('🔄 Comparador Token DIAN y Libro Auxiliar')
@@ -278,13 +365,16 @@ def main():
 
                     df_token_proc = procesar_token_dian(df_token)
                     df_libro_proc = procesar_libro_auxiliar(df_libro)
+                    df_lineas = leer_lineas_libro(df_libro)
 
                     if df_token_proc is not None and df_libro_proc is not None:
-                        resultados = buscar_coincidencias(df_token_proc, df_libro_proc)
+                        resultados = buscar_coincidencias(df_token_proc, df_libro_proc, df_lineas=df_lineas)
 
                         if resultados is not None:
                             st.session_state['resultados_df'] = resultados
                             st.session_state['nombre_empresa'] = nombre_empresa
+                            st.session_state['hoja_auxiliar'] = agrupar_auxiliar(df_lineas)
+                            st.session_state['hoja_descuadres'] = calcular_descuadres_tercero(df_lineas)
                             st.success("¡Procesamiento completado! Desplázate hacia abajo para descargar el archivo.")
                         else:
                             st.error("Error al buscar coincidencias en los datos.")
@@ -298,7 +388,11 @@ def main():
         df_resultados = st.session_state['resultados_df']
         nombre_empresa_file = st.session_state['nombre_empresa']
 
-        excel_data, nombre_archivo_excel = to_excel(df_resultados, nombre_empresa_file)
+        excel_data, nombre_archivo_excel = to_excel(
+            df_resultados, nombre_empresa_file,
+            st.session_state.get('hoja_auxiliar'),
+            _solo_descuadrados(st.session_state.get('hoja_descuadres'))
+        )
 
         if excel_data is not None and nombre_archivo_excel is not None:
             st.subheader("✅ Descargar Resultados")
