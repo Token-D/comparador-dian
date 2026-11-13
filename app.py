@@ -130,7 +130,15 @@ def buscar_coincidencias(df_token, df_libro, tolerancia=TOLERANCIA, dias_max=DIA
             for idx_l, deb in por_folio['Debitos'].items():
                 parejas.append((abs(float(total) - deb), idx_t, idx_l))
 
-        for dif, idx_t, idx_l in sorted(parejas, key=lambda p: p[0]):
+        # Orden: menor diferencia primero; ante empate, la factura y el egreso más antiguos
+        def _clave(p):
+            f_t = fechas_token.get(p[1], pd.NaT)
+            f_l = libro.at[p[2], 'Fecha']
+            return (p[0],
+                    f_t if pd.notna(f_t) else pd.Timestamp.max,
+                    f_l if pd.notna(f_l) else pd.Timestamp.max)
+
+        for dif, idx_t, idx_l in sorted(parejas, key=_clave):
             if idx_t in facturas_usadas or idx_l in egresos_usados:
                 continue
             asignar(idx_t, idx_l, 'Exacto' if dif <= tolerancia else 'Probable')
@@ -153,7 +161,7 @@ def buscar_coincidencias(df_token, df_libro, tolerancia=TOLERANCIA, dias_max=DIA
                     if dias <= dias_max:
                         parejas.append((dias, idx_t, idx_l))
 
-        for dias, idx_t, idx_l in sorted(parejas, key=lambda p: p[0]):
+        for dias, idx_t, idx_l in sorted(parejas, key=_clave):
             if idx_t in facturas_usadas or idx_l in egresos_usados:
                 continue
             asignar(idx_t, idx_l, 'Por valor')
